@@ -1,6 +1,8 @@
 use std::env::args;
-use std::iter::Peekable;
-use std::str::Chars;
+
+use crate::tokenize::Token;
+
+mod tokenize;
 
 fn main() {
     let args = args().collect::<Vec<String>>();
@@ -10,42 +12,32 @@ fn main() {
         return;
     }
 
-    let codes = &mut args.get(1).unwrap().chars().peekable();
+    let mut tokens = tokenize::Tokenizer::new(args.get(1).unwrap().chars().peekable());
 
     println!("  .global main");
     println!("main:");
-    println!("  li a0, {}", strtol(codes));
 
-    while let Some(ch) = codes.next() {
+    if let Token::Num(i) = tokens.next().unwrap() {
+        println!("  li a0, {}", i);
+    } else {
+        eprintln!("bad token");
+        return;
+    }
+
+    while let Some(ch) = tokens.next() {
         match ch {
-            '+' => {
-                println!("  addi a0, a0, {}", strtol(codes));
-            },
-            '-' => {
-                println!("  addi a0, a0, -{}", strtol(codes));
-            },
+            Token::Punct('+') => {
+                println!("  addi a0, a0, {}", tokens.next().unwrap().num().unwrap());
+            }
+            Token::Punct('-') => {
+                println!("  addi a0, a0, -{}", tokens.next().unwrap().num().unwrap());
+            }
             _ => {
-                eprintln!("unexpected character: {}", ch);
-                return
+                eprintln!("unexpected character:");
+                return;
             }
         }
     }
 
     println!("  ret");
-}
-
-fn strtol(chars: &mut Peekable<Chars>) -> usize {
-    let mut num: usize = 0;
-    while let Some(ch) = chars.peek() {
-        match ch {
-            '0'..='9' => {
-                num = num * 10 + *ch as usize - '0' as usize;
-                chars.next();
-            }
-            _ => {
-                break;
-            }
-        }
-    }
-    num
 }
