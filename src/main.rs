@@ -1,43 +1,39 @@
-use std::env::args;
+use std::{env::args, error::Error};
 
 use crate::tokenize::Token;
 
 mod tokenize;
+mod error;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let args = args().collect::<Vec<String>>();
 
     if args.len() != 2 {
         eprintln!("{}: invalid number of arguments", args.get(0).unwrap());
-        return;
+        return Ok(());
     }
 
-    let mut tokens = tokenize::Tokenizer::new(args.get(1).unwrap().chars().peekable());
+    let mut tokenizer = tokenize::Tokenizer::new(args.get(1).unwrap().chars().peekable());
 
     println!("  .global main");
     println!("main:");
+    println!("  li a0, {}", tokenizer.expect_num()?);
 
-    if let Token::Num(i) = tokens.next().unwrap() {
-        println!("  li a0, {}", i);
-    } else {
-        eprintln!("bad token");
-        return;
-    }
-
-    while let Some(ch) = tokens.next() {
-        match ch {
+    while let Some(tok) = tokenizer.next() {
+        match tok {
             Token::Punct('+') => {
-                println!("  addi a0, a0, {}", tokens.next().unwrap().num().unwrap());
+                println!("  addi a0, a0, {}", tokenizer.expect_num()?);
             }
             Token::Punct('-') => {
-                println!("  addi a0, a0, -{}", tokens.next().unwrap().num().unwrap());
+                println!("  addi a0, a0, -{}", tokenizer.expect_num()?);
             }
             _ => {
-                eprintln!("unexpected character:");
-                return;
+                eprintln!("unexpected token: {}", tok);
+                return Ok(());
             }
         }
     }
 
     println!("  ret");
+    Ok(())
 }
