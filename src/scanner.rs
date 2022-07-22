@@ -1,9 +1,6 @@
 use std::{fmt, iter::Peekable, str::Chars};
 
-use crate::{
-    error::{Result},
-    position::Position,
-};
+use crate::{error::Result, position::Position};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {

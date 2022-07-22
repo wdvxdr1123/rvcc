@@ -39,11 +39,11 @@ fn compile(s: String) -> Result<()> {
 
 fn push() {
     println!("  addi sp, sp, -8");
-    println!("  sd   a0, 8(sp)");
+    println!("  sd   a0, 0(sp)");
 }
 
 fn pop(reg: &str) {
-    println!("  ld   {}, 8(sp)", reg);
+    println!("  ld   {}, 0(sp)", reg);
     println!("  addi sp, sp, 8");
 }
 
@@ -51,6 +51,17 @@ fn gen_expr(expr: Node) -> Result<()> {
     match expr {
         Node::Number(n) => {
             println!("  li a0, {}", n);
+            Ok(())
+        }
+        Node::Unay { op, expr } => {
+            gen_expr(*expr)?;
+            match op {
+                parser::BinaryOperator::SUB => {
+                    println!("  sub a0, x0, a0");
+                }
+                parser::BinaryOperator::ADD => {}
+                _ => unreachable!(),
+            }
             Ok(())
         }
         Node::BinaryExpr { op, lhs, rhs } => {

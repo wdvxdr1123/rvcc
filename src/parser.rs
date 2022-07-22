@@ -2,15 +2,17 @@ use std::iter::Peekable;
 
 use crate::error::{Result, SyntaxError};
 use crate::scanner::Token;
-use crate::scanner::{
-    TokenKind::{self, *},
-};
+use crate::scanner::TokenKind::{self, *};
 
 pub enum Node {
     BinaryExpr {
         op: BinaryOperator,
         lhs: Box<Node>,
         rhs: Box<Node>,
+    },
+    Unay {
+        op: BinaryOperator,
+        expr: Box<Node>,
     },
     Number(usize),
 }
@@ -24,7 +26,6 @@ pub enum BinaryOperator {
 
 pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
-
 }
 
 impl<T> Parser<T>
@@ -32,32 +33,37 @@ where
     T: Iterator<Item = Token>,
 {
     pub fn new(tokens: Peekable<T>) -> Self {
-        Parser {
-            tokens,
+        Parser { tokens }
+    }
+
+    fn peek<'a>(&mut self) -> Result<Token> {
+        if let Some(tok) = self.tokens.peek() {
+            Ok(tok.clone())
+        } else {
+            Err(SyntaxError {
+                pos: crate::position::Position { line: 0, column: 0 },
+                msg: "unexpected eof".to_string(),
+            })
         }
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<()> {
-        if let Some(tok) = self.tokens.next() {
-            if tok.kind == kind {
-                return Ok(());
-            }
-            return Err(SyntaxError {
-                pos: tok.position,
-                msg: format!("expected {}", kind),
-            });
+        let tok = self.peek()?;
+        if tok.kind == kind {
+            self.tokens.next();
+            return Ok(());
         }
-        Err(SyntaxError {
-            pos: crate::position::Position { line: 0, column: 0 },
-            msg: "unexpected eof".to_string(),
-        })
+        return Err(SyntaxError {
+            pos: tok.position,
+            msg: format!("expected {}", kind),
+        });
     }
 
     pub fn expr(&mut self) -> Result<Node> {
         let mut node = self.mul()?;
 
         loop {
-            let tok = self.tokens.peek().unwrap();
+            let tok = self.peek()?;
             match tok.kind {
                 Add => {
                     self.expect(Add)?;
@@ -80,8 +86,27 @@ where
         }
     }
 
+    fn unary(&mut self) -> Result<Node> {
+        let tok = self.peek()?;
+        match tok.kind {
+            Add => {
+                self.expect(Add)?;
+                return self.unary();
+            }
+            Sub => {
+                self.expect(Sub)?;
+                return Ok(Node::Unay {
+                    op: BinaryOperator::SUB,
+                    expr: self.unary()?.into(),
+                });
+            }
+            _ => {}
+        };
+        self.primary_expr()
+    }
+
     fn primary_expr(&mut self) -> Result<Node> {
-        let tok = self.tokens.peek().unwrap();
+        let tok = self.peek()?;
         if tok.kind == LParen {
             self.expect(LParen)?;
             let expr = self.expr()?;
@@ -105,17 +130,17 @@ where
     }
 
     fn mul(&mut self) -> Result<Node> {
-        let mut node = self.primary_expr()?;
+        let mut node = self.unary()?;
 
         loop {
-            let tok = self.tokens.peek().unwrap();
+            let tok = self.peek()?;
             match tok.kind {
                 Mul => {
                     self.expect(Mul)?;
                     node = Node::BinaryExpr {
                         op: BinaryOperator::MUL,
                         lhs: node.into(),
-                        rhs: self.primary_expr()?.into(),
+                        rhs: self.unary()?.into(),
                     };
                 }
                 Div => {
@@ -123,7 +148,7 @@ where
                     node = Node::BinaryExpr {
                         op: BinaryOperator::DIV,
                         lhs: node.into(),
-                        rhs: self.primary_expr()?.into(),
+                        rhs: self.unary()?.into(),
                     };
                 }
                 _ => break Ok(node),
