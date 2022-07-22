@@ -13,6 +13,18 @@ pub enum TokenKind {
     LParen, // (
     RParen, // )
 
+    EQ,  // ==
+    NEQ, // !=
+    GEQ, // >=
+    LEQ, // <=
+
+    GTR, // >
+    LSS, // <
+
+    Assign, // =
+
+    NOT, // !
+
     Number,
     EOF,
 }
@@ -76,6 +88,12 @@ impl<'a> Scanner<'a> {
                 break Invalid;
             }
             match ch.unwrap() {
+                '\n' => {
+                    self.next_char();
+                    self.line = self.line +1;
+                    self.col = 0;
+                    continue;
+                }
                 ' ' | '\t' => {
                     // skip whitespace
                     self.next_char();
@@ -93,6 +111,22 @@ impl<'a> Scanner<'a> {
                     };
                     self.next_char();
                     break tok;
+                }
+                '=' => {
+                    self.next_char();
+                    break self.switch2(Assign, '=', EQ);
+                }
+                '>' => {
+                    self.next_char();
+                    break self.switch2(GTR, '=', GEQ);
+                }
+                '<' => {
+                    self.next_char();
+                    break self.switch2(LSS, '=', LEQ);
+                }
+                '!' => {
+                    self.next_char();
+                    break self.switch2(NOT, '=', NEQ);
                 }
                 '0'..='9' => {
                     while let Some(ch) = self.p.peek() {
@@ -130,6 +164,16 @@ impl<'a> Scanner<'a> {
         Position {
             line: self.line,
             column: self.col,
+        }
+    }
+
+    fn switch2(&mut self, tok0: TokenKind, c: char, tok1: TokenKind) -> TokenKind {
+        match self.p.peek() {
+            Some(&_c) if _c == c => {
+                self.next_char();
+                tok1
+            }
+            _ => tok0,
         }
     }
 }

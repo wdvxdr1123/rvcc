@@ -5,7 +5,7 @@ use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
 
 pub enum Node {
-    BinaryExpr {
+    Binary { // lhs op rhs
         op: BinaryOperator,
         lhs: Box<Node>,
         rhs: Box<Node>,
@@ -22,6 +22,10 @@ pub enum BinaryOperator {
     SUB,
     MUL,
     DIV,
+    LT,
+    LE,
+    EQ,
+    NE,
 }
 
 pub struct Parser<T: Iterator<Item = Token>> {
@@ -60,6 +64,80 @@ where
     }
 
     pub fn expr(&mut self) -> Result<Node> {
+        self.equality()
+    }
+
+    fn equality(&mut self) -> Result<Node> {
+        let mut node = self.relational()?;
+
+        loop {
+            let tok = self.peek()?;
+            match tok.kind {
+                EQ => {
+                    self.expect(EQ)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::EQ,
+                        lhs: node.into(),
+                        rhs: self.add()?.into(),
+                    };
+                }
+                NEQ => {
+                    self.expect(NEQ)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::NE,
+                        lhs: node.into(),
+                        rhs: self.add()?.into(),
+                    };
+                }
+                _ => break Ok(node),
+            }
+        }
+    }
+
+    fn relational(&mut self) -> Result<Node> {
+        let  mut node = self.add()?;
+
+        loop {
+            let tok = self.peek()?;
+            match tok.kind {
+                LSS => {
+                    self.expect(LSS)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::LT,
+                        lhs: node.into(),
+                        rhs: self.add()?.into(),
+                    };
+                }
+                LEQ => {
+                    self.expect(LEQ)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::LE,
+                        lhs: node.into(),
+                        rhs: self.add()?.into(),
+                    };
+                }
+                GTR => {
+                    self.expect(GTR)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::LT,
+                        lhs: self.add()?.into(),
+                        rhs: node.into(),
+                    };
+                }
+                GEQ => {
+                    self.expect(GEQ)?;
+                    node = Node::Binary {
+                        op: BinaryOperator::LE,
+                        lhs: self.add()?.into(),
+                        rhs: node.into(),
+                    };
+                }
+                _ => break Ok(node),
+            }
+        }
+    }
+
+    pub fn add(&mut self) -> Result<Node> {
         let mut node = self.mul()?;
 
         loop {
@@ -67,7 +145,7 @@ where
             match tok.kind {
                 Add => {
                     self.expect(Add)?;
-                    node = Node::BinaryExpr {
+                    node = Node::Binary {
                         op: BinaryOperator::ADD,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
@@ -75,7 +153,7 @@ where
                 }
                 Sub => {
                     self.expect(Sub)?;
-                    node = Node::BinaryExpr {
+                    node = Node::Binary {
                         op: BinaryOperator::SUB,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
@@ -137,7 +215,7 @@ where
             match tok.kind {
                 Mul => {
                     self.expect(Mul)?;
-                    node = Node::BinaryExpr {
+                    node = Node::Binary {
                         op: BinaryOperator::MUL,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
@@ -145,7 +223,7 @@ where
                 }
                 Div => {
                     self.expect(Div)?;
-                    node = Node::BinaryExpr {
+                    node = Node::Binary {
                         op: BinaryOperator::DIV,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),

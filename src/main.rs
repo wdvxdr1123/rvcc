@@ -64,17 +64,31 @@ fn gen_expr(expr: Node) -> Result<()> {
             }
             Ok(())
         }
-        Node::BinaryExpr { op, lhs, rhs } => {
+        Node::Binary { op, lhs, rhs } => {
             gen_expr(*lhs)?;
             push();
             gen_expr(*rhs)?;
             pop("a1");
 
+            use parser::BinaryOperator::*;
             match op {
-                parser::BinaryOperator::ADD => println!("  add a0, a1, a0"),
-                parser::BinaryOperator::SUB => println!("  sub a0, a1, a0"),
-                parser::BinaryOperator::MUL => println!("  mul a0, a1, a0"),
-                parser::BinaryOperator::DIV => println!("  div a0, a1, a0"),
+                ADD => println!("  add a0, a1, a0"),
+                SUB => println!("  sub a0, a1, a0"),
+                MUL => println!("  mul a0, a1, a0"),
+                DIV => println!("  div a0, a1, a0"),
+                LT => println!("  slt a0, a1, a0"),
+                LE => {
+                    println!("  sub a0, a1, a0");
+                    println!("  slti a0, a0, 1");
+                },
+                EQ => {
+                    println!("  sub a0, a1, a0");
+                    println!("  sltiu a0, a0, 1");
+                },
+                NE => {
+                    println!("  sub a0, a1, a0");
+                    println!("  sltu a0, x0, a0");
+                },
             };
 
             Ok(())
