@@ -139,7 +139,8 @@ impl Compiler {
                 self.gen_expr(*expr)?;
                 println!("  j .L.return");
                 Ok(())
-            },
+            }
+            Stmt::Block(stmts) => self.stmts(stmts),
         }
     }
 

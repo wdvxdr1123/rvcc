@@ -30,6 +30,7 @@ pub enum Expr {
 pub enum Stmt {
     Expr(Box<Expr>),
     Return(Box<Expr>),
+    Block(Vec<Stmt>),
 }
 
 #[derive(Clone)]
@@ -110,20 +111,41 @@ where
         Ok(s)
     }
 
-    // expr-statement =  expr ';'
+    // stmt = "return" expr ";"
+    //      | compound-stmt
+    //      | expr-stmt
     fn stmt(&mut self) -> Result<Stmt> {
         let tok = self.peek()?;
         match tok.kind {
             // return-stmt = "return" expr ";"
-            RETURN => { 
+            RETURN => {
                 self.expect(RETURN)?;
                 let expr = self.expr()?;
                 self.expect(SEMICOLON)?;
                 return Ok(Stmt::Return(expr.into()));
             }
-            _ => {}
+            LBRACE => Ok(Stmt::Block(self.compound_stmt()?)),
+            _ => self.expr_stmt(),
         }
+    }
 
+    // compound-stmt = "{" stmt* "}"
+    fn compound_stmt(&mut self) -> Result<Vec<Stmt>> {
+        self.expect(LBRACE)?;
+
+        let mut stmt = vec![];
+        loop {
+            match self.peek()?.kind {
+                RBRACE => break,
+                _ => stmt.push(self.stmt()?),
+            }
+        }
+        self.expect(RBRACE)?;
+        Ok(stmt)
+    }
+
+    // expr-stmt =  expr ';'
+    fn expr_stmt(&mut self) -> Result<Stmt> {
         let expr = self.expr()?;
         self.expect(SEMICOLON)?;
         Ok(Stmt::Expr(expr.into()))
@@ -264,10 +286,10 @@ where
     fn primary_expr(&mut self) -> Result<Expr> {
         let tok = self.peek()?;
         match tok.kind {
-            LParen => {
-                self.expect(LParen)?;
+            LPAREN => {
+                self.expect(LPAREN)?;
                 let expr = self.expr()?;
-                self.expect(RParen)?;
+                self.expect(RPAREN)?;
                 return Ok(expr);
             }
             NUMBER => {

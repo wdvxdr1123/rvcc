@@ -20,8 +20,12 @@ pub enum TokenKind {
     Mul, // *
     Div, // /
 
-    LParen, // (
-    RParen, // )
+    LPAREN, // (
+    RPAREN, // )
+    LBRACK, // [
+    RBRACK, // ]
+    LBRACE, // {
+    RBRACE, // }
 
     EQ,  // ==
     NEQ, // !=
@@ -109,14 +113,25 @@ impl<'a> Scanner<'a> {
                 'a'..='z' | 'A'..='Z' => {
                     break self.ident();
                 }
-                c @ ('+' | '-' | '*' | '/' | '(' | ')' | ';') => {
+                c @ ('(' | ')' | '[' | ']' | '{' | '}') => {
+                    let tok = match *c {
+                        '(' => LPAREN,
+                        ')' => RPAREN,
+                        '[' => LBRACK,
+                        ']' => RBRACK,
+                        '{' => LBRACE,
+                        '}' => RBRACE,
+                        _ => unreachable!(),
+                    };
+                    self.next_char();
+                    break tok;
+                }
+                c @ ('+' | '-' | '*' | '/' | ';') => {
                     let tok = match *c {
                         '+' => Add,
                         '-' => Sub,
                         '*' => Mul,
                         '/' => Div,
-                        '(' => LParen,
-                        ')' => RParen,
                         ';' => SEMICOLON,
                         _ => unreachable!(),
                     };
