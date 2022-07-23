@@ -19,6 +19,8 @@ assert() {
   fi
 }
 
+cargo build
+
 assert 0 '0;'
 assert 42 '42;'
 assert 21 '5+20-4;'
@@ -50,5 +52,9 @@ assert 1 '1>=1;'
 assert 0 '1>=2;'
 
 assert 3 '1; 2; 3;'
+
+assert 3 'a=3; a;'
+assert 8 'a=3; z=5; a+z;'
+assert 6 'a=b=3; a+b;'
 
 echo OK

@@ -5,6 +5,9 @@ use crate::{error::Result, position::Position};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Invalid,
+
+    IDENT,
+
     Add, // +
     Sub, // -
     Mul, // *
@@ -34,7 +37,7 @@ pub enum TokenKind {
 pub struct Token {
     pub kind: TokenKind,
     pub position: Position,
-    pub num: usize,
+    pub literal: String,
 }
 
 pub struct Scanner<'a> {
@@ -43,9 +46,7 @@ pub struct Scanner<'a> {
     col: usize,
 
     tok0: TokenKind,
-
-    pub number: usize,
-    pub string: String,
+    pub literal: String,
 }
 
 impl<'a> Scanner<'a> {
@@ -55,8 +56,7 @@ impl<'a> Scanner<'a> {
             line: 1,
             col: 0,
             tok0: TokenKind::Invalid,
-            number: 0,
-            string: "".to_string(),
+            literal: "".to_string(),
         }
     }
 
@@ -64,16 +64,14 @@ impl<'a> Scanner<'a> {
         let mut tokens = vec![];
         loop {
             self.step();
-            let mut tok = Token {
+            let tok = Token {
                 kind: self.tok0,
                 position: self.pos(),
-                num: 0,
+                literal: self.literal.clone(),
             };
-            if tok.kind == TokenKind::Number {
-                tok.num = self.number;
-            }
-            tokens.push(tok.clone());
-            if tok.kind == TokenKind::Invalid || tok.kind == TokenKind::EOF {
+            let b = tok.kind == TokenKind::Invalid || tok.kind == TokenKind::EOF;
+            tokens.push(tok);
+            if b {
                 break;
             }
         }
@@ -82,7 +80,6 @@ impl<'a> Scanner<'a> {
 
     fn step(&mut self) {
         use TokenKind::*;
-        let mut num: usize = 0;
         let tok: TokenKind = loop {
             let ch = self.p.peek();
             if ch.is_none() {
@@ -99,6 +96,9 @@ impl<'a> Scanner<'a> {
                     // skip whitespace
                     self.next_char();
                     continue;
+                }
+                'a'..='z' | 'A'..='Z' => {
+                    break self.ident();
                 }
                 c @ ('+' | '-' | '*' | '/' | '(' | ')' | ';') => {
                     let tok = match *c {
@@ -130,28 +130,13 @@ impl<'a> Scanner<'a> {
                     self.next_char();
                     break self.switch2(NOT, '=', NEQ);
                 }
-                '0'..='9' => {
-                    while let Some(ch) = self.p.peek() {
-                        match ch {
-                            '0'..='9' => {
-                                num = num * 10 + *ch as usize - '0' as usize;
-                                self.next_char();
-                            }
-                            _ => {
-                                break;
-                            }
-                        }
-                    }
-                    break Number;
-                }
+                '0'..='9' => break self.number(),
                 _ => {
                     break EOF;
                 }
             }
         };
-
         self.tok0 = tok;
-        self.number = num;
     }
 
     pub fn next_char(&mut self) -> Option<char> {
@@ -160,6 +145,37 @@ impl<'a> Scanner<'a> {
             self.col = self.col + 1;
         }
         ch
+    }
+
+    fn number(&mut self) -> TokenKind {
+        let mut literal = vec![];
+        while let Some(&ch) = self.p.peek() {
+            match ch {
+                '0'..='9' => {
+                    literal.push(ch);
+                    self.next_char();
+                }
+                _ => break,
+            }
+        }
+        self.literal = literal.iter().collect();
+        TokenKind::Number
+    }
+
+    fn ident(&mut self) -> TokenKind {
+        let mut literal = vec![];
+        while let Some(&ch) = self.p.peek() {
+            match ch {
+                '0'..='9' | 'a'..='z' | 'A'..='Z' => {
+                    literal.push(ch);
+                    self.next_char();
+                }
+                _ => break,
+            }
+        }
+        self.literal = literal.iter().collect();
+        // TODO: keyword
+        TokenKind::IDENT
     }
 
     pub fn pos(&self) -> Position {

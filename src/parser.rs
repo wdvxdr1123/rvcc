@@ -17,6 +17,8 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Number(usize),
+    Ident(String),
+    Assign { lhs: Box<Expr>, rhs: Box<Expr> },
 }
 
 pub enum Stmt {
@@ -84,7 +86,16 @@ where
     }
 
     fn expr(&mut self) -> Result<Expr> {
-        self.equality()
+        self.assign()
+    }
+
+    fn assign(&mut self) -> Result<Expr> {
+        let mut expr = self.equality()?;
+        if self.peek()?.kind == Assign {
+            self.expect(Assign)?;
+            expr = Expr::Assign { lhs: expr.into(), rhs: self.assign()?.into() }
+        }
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Expr> {
@@ -213,15 +224,16 @@ where
                 return Ok(expr);
             }
             Number => {
-                //"".parse::<usize>().map_err(|_err| {
-                //   SyntaxError{
-                //        pos: tok.position,
-                //        msg: "invalid number".to_string(),
-                //    }
-                //})?
-                let num = tok.num;
                 self.expect(Number)?;
+                let num = tok.literal.parse::<usize>().map_err(|_err| SyntaxError {
+                    pos: tok.position,
+                    msg: "invalid number".to_string(),
+                })?;
                 return Ok(Expr::Number(num));
+            }
+            IDENT => {
+                self.expect(IDENT)?;
+                return Ok(Expr::Ident(tok.literal));
             }
             _ => Err(self.error(format!("expected expresssion"))),
         }

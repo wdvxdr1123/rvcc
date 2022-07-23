@@ -40,7 +40,16 @@ fn compile(s: String) -> Result<()> {
 
     println!("  .global main");
     println!("main:");
+
+    // alloc stack
+    // todo: store a3?
+    println!("addi a3, sp, 0"); // mv a3, sp
+    println!("addi sp, sp, -208"); // 208 == ('z' - 'a' + 1) * 8, it's the stack size for all possible single-letter 64 bit integer variables.
+    
     stmts(p)?;
+
+    // free stack
+    println!("addi sp, a3, 0");
     println!("  ret");
     Ok(())
 }
@@ -101,6 +110,19 @@ fn gen_expr(expr: Expr) -> Result<()> {
 
             Ok(())
         }
+        Expr::Ident(_) => {
+            gen_addr(expr)?;
+            println!("  ld a0, (a0)");
+            Ok(())
+        }
+        Expr::Assign { lhs, rhs } => {
+            gen_addr(*lhs)?;
+            push();
+            gen_expr(*rhs)?;
+            pop("a1");
+            println!("sd a0, (a1)");
+            Ok(())
+        }
     }
 }
 
@@ -112,6 +134,21 @@ fn stmts(ss: Vec<Stmt>) -> Result<()> {
 }
 
 fn stmt(s: Stmt) -> Result<()> {
-    let Stmt::Expr(expr) = s;
-    gen_expr(*expr)
+    match s {
+        Stmt::Expr(expr) => gen_expr(*expr),
+    }
+}
+
+fn gen_addr(e: Expr) -> Result<()> {
+    match e {
+        Expr::Ident(name) => {
+            if name.len() != 1 {
+                todo!()
+            }
+            let offset = (name.chars().nth(0).unwrap() as u8 - 'a' as u8 + 1) * 8;
+            println!("  addi a0, a3, -{}", offset);
+            Ok(())
+        }
+        _ => todo!(),
+    }
 }
