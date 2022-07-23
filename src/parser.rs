@@ -29,6 +29,7 @@ pub enum Expr {
 #[derive(Clone)]
 pub enum Stmt {
     Expr(Box<Expr>),
+    Return(Box<Expr>),
 }
 
 #[derive(Clone)]
@@ -111,6 +112,18 @@ where
 
     // expr-statement =  expr ';'
     fn stmt(&mut self) -> Result<Stmt> {
+        let tok = self.peek()?;
+        match tok.kind {
+            // return-stmt = "return" expr ";"
+            RETURN => { 
+                self.expect(RETURN)?;
+                let expr = self.expr()?;
+                self.expect(SEMICOLON)?;
+                return Ok(Stmt::Return(expr.into()));
+            }
+            _ => {}
+        }
+
         let expr = self.expr()?;
         self.expect(SEMICOLON)?;
         Ok(Stmt::Expr(expr.into()))
@@ -257,8 +270,8 @@ where
                 self.expect(RParen)?;
                 return Ok(expr);
             }
-            Number => {
-                self.expect(Number)?;
+            NUMBER => {
+                self.expect(NUMBER)?;
                 let num = tok.literal.parse::<usize>().map_err(|_err| SyntaxError {
                     pos: tok.position,
                     msg: "invalid number".to_string(),

@@ -1,7 +1,6 @@
 use std::{env::args, error::Error};
 
 use error::{error_at, Result};
-use parser::{Expr, Stmt};
 use scanner::Scanner;
 
 mod compiler;

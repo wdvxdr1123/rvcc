@@ -46,6 +46,7 @@ impl Compiler {
             self.stmt(s)?;
         }
 
+        println!(".L.return:");
         // free stack
         println!("  addi sp, a3, 0");
         println!("  ret");
@@ -134,6 +135,11 @@ impl Compiler {
     fn stmt(&mut self, s: Stmt) -> Result<()> {
         match s {
             Stmt::Expr(expr) => self.gen_expr(*expr),
+            Stmt::Return(expr) => {
+                self.gen_expr(*expr)?;
+                println!("  j .L.return");
+                Ok(())
+            },
         }
     }
 

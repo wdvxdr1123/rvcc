@@ -2,11 +2,18 @@ use std::{fmt, iter::Peekable, str::Chars};
 
 use crate::{error::Result, position::Position};
 
+use phf::phf_map;
+
+static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
+    "return" => TokenKind::RETURN,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Invalid,
 
     IDENT,
+    NUMBER,
 
     Add, // +
     Sub, // -
@@ -29,7 +36,9 @@ pub enum TokenKind {
     NOT,       // !
     SEMICOLON, // ;
 
-    Number,
+    // keywords
+    RETURN,
+
     EOF,
 }
 
@@ -159,7 +168,7 @@ impl<'a> Scanner<'a> {
             }
         }
         self.literal = literal.iter().collect();
-        TokenKind::Number
+        TokenKind::NUMBER
     }
 
     fn ident(&mut self) -> TokenKind {
@@ -173,8 +182,11 @@ impl<'a> Scanner<'a> {
                 _ => break,
             }
         }
-        self.literal = literal.iter().collect();
-        // TODO: keyword
+        let lit = literal.iter().collect::<String>();
+        if let Some(keyword) = KEYWORDS.get(lit.as_str()) {
+            return *keyword;
+        }
+        self.literal = lit;
         TokenKind::IDENT
     }
 
