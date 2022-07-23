@@ -141,6 +141,7 @@ impl Compiler {
                 Ok(())
             }
             Stmt::Block(stmts) => self.stmts(stmts),
+            Stmt::None => Ok(()),
         }
     }
 

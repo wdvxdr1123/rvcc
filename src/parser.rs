@@ -31,6 +31,7 @@ pub enum Stmt {
     Expr(Box<Expr>),
     Return(Box<Expr>),
     Block(Vec<Stmt>),
+    None,
 }
 
 #[derive(Clone)]
@@ -144,8 +145,13 @@ where
         Ok(stmt)
     }
 
-    // expr-stmt =  expr ';'
+    // expr-stmt =  expr? ';'
     fn expr_stmt(&mut self) -> Result<Stmt> {
+        if self.peek()?.kind == SEMICOLON {
+            self.expect(SEMICOLON)?;
+            return Ok(Stmt::None);
+        }
+
         let expr = self.expr()?;
         self.expect(SEMICOLON)?;
         Ok(Stmt::Expr(expr.into()))
