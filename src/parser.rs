@@ -1,10 +1,12 @@
 use std::iter::Peekable;
 
+use crate::compiler::{Func, Object};
 use crate::error::{Result, SyntaxError};
 use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
 
+#[derive(Clone)]
 pub enum Expr {
     Binary {
         // lhs op rhs
@@ -18,13 +20,18 @@ pub enum Expr {
     },
     Number(usize),
     Ident(String),
-    Assign { lhs: Box<Expr>, rhs: Box<Expr> },
+    Assign {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
 }
 
+#[derive(Clone)]
 pub enum Stmt {
     Expr(Box<Expr>),
 }
 
+#[derive(Clone)]
 pub enum BinOp {
     ADD,
     SUB,
@@ -39,6 +46,7 @@ pub enum BinOp {
 pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
     position: Position,
+    objs: Vec<String>,
 }
 
 impl<T> Parser<T>
@@ -49,6 +57,7 @@ where
         Parser {
             tokens,
             position: Position { line: 0, column: 0 },
+            objs: vec![],
         }
     }
 
@@ -68,6 +77,28 @@ where
             return Ok(());
         }
         return Err(self.error(format!("expected {}", kind)));
+    }
+
+    pub fn function(&mut self) -> Result<Func> {
+        let mut func = Func {
+            ..Default::default()
+        };
+        func.body = self.stmts()?;
+
+        for o in self.objs.iter() {
+            func.objs.push(Object {
+                name: o.clone(),
+                offset: 0,
+            })
+        }
+
+        Ok(func)
+    }
+
+    fn ident(&mut self, name: &String) {
+        if !self.objs.contains(name) {
+            self.objs.push(name.clone())
+        }
     }
 
     pub fn stmts(&mut self) -> Result<Vec<Stmt>> {
@@ -93,7 +124,10 @@ where
         let mut expr = self.equality()?;
         if self.peek()?.kind == Assign {
             self.expect(Assign)?;
-            expr = Expr::Assign { lhs: expr.into(), rhs: self.assign()?.into() }
+            expr = Expr::Assign {
+                lhs: expr.into(),
+                rhs: self.assign()?.into(),
+            }
         }
         Ok(expr)
     }
@@ -233,6 +267,7 @@ where
             }
             IDENT => {
                 self.expect(IDENT)?;
+                self.ident(&tok.literal);
                 return Ok(Expr::Ident(tok.literal));
             }
             _ => Err(self.error(format!("expected expresssion"))),
