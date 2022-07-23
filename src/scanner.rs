@@ -6,6 +6,8 @@ use phf::phf_map;
 
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "return" => TokenKind::RETURN,
+    "if" => TokenKind::IF,
+    "else" => TokenKind::ELSE,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,6 +44,8 @@ pub enum TokenKind {
 
     // keywords
     RETURN,
+    IF,
+    ELSE,
 
     EOF,
 }

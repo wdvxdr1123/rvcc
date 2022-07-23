@@ -31,6 +31,11 @@ pub enum Stmt {
     Expr(Box<Expr>),
     Return(Box<Expr>),
     Block(Vec<Stmt>),
+    If {
+        cond: Box<Expr>,
+        then: Box<Stmt>,
+        r#else: Option<Box<Stmt>>,
+    },
     None,
 }
 
@@ -113,6 +118,7 @@ where
     }
 
     // stmt = "return" expr ";"
+    //      | "if" "(" expr ")" stmt ("else" stmt)?
     //      | compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> Result<Stmt> {
@@ -124,6 +130,26 @@ where
                 let expr = self.expr()?;
                 self.expect(SEMICOLON)?;
                 return Ok(Stmt::Return(expr.into()));
+            }
+            IF => {
+                self.expect(IF)?;
+                self.expect(LPAREN)?;
+                let cond = self.expr()?;
+                self.expect(RPAREN)?;
+
+                let then = self.stmt()?;
+                let els = if self.peek()?.kind == ELSE {
+                    self.expect(ELSE)?;
+                    Some(Box::new(self.stmt()?))
+                } else {
+                    None
+                };
+
+                Ok(Stmt::If {
+                    cond: cond.into(),
+                    then: then.into(),
+                    r#else: els,
+                })
             }
             LBRACE => Ok(Stmt::Block(self.compound_stmt()?)),
             _ => self.expr_stmt(),

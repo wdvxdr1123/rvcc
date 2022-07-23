@@ -37,6 +37,6 @@ fn compile(s: String) -> Result<()> {
         }
     }
     let prog = parser::Parser::new(tokens.into_iter().peekable()).function()?;
-    compiler::Compiler { func: prog }.compile()?;
+    compiler::Compiler { func: prog, if_count: 0 }.compile()?;
     Ok(())
 }

@@ -15,6 +15,7 @@ pub struct Object {
 
 pub struct Compiler {
     pub func: Func,
+    pub if_count: usize,
 }
 
 fn push() {
@@ -142,6 +143,21 @@ impl Compiler {
             }
             Stmt::Block(stmts) => self.stmts(stmts),
             Stmt::None => Ok(()),
+            Stmt::If { cond, then, r#else } => {
+                let c = self.if_count;
+                self.if_count = self.if_count + 1;
+
+                self.gen_expr(*cond)?;
+                println!("  beqz a0, .L.else.{}", c);
+                self.stmt(*then)?;
+                println!("  j .L.end.{}", c);
+                println!(".L.else.{}:", c);
+                if let Some(els) = r#else {
+                    self.stmt(*els)?;
+                }
+                println!(".L.end.{}:", c);
+                Ok(())
+            }
         }
     }
 
