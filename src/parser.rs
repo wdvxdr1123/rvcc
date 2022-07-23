@@ -1,23 +1,29 @@
 use std::iter::Peekable;
 
 use crate::error::{Result, SyntaxError};
+use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
 
-pub enum Node {
-    Binary { // lhs op rhs
-        op: BinaryOperator,
-        lhs: Box<Node>,
-        rhs: Box<Node>,
+pub enum Expr {
+    Binary {
+        // lhs op rhs
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
     },
     Unay {
-        op: BinaryOperator,
-        expr: Box<Node>,
+        op: BinOp,
+        expr: Box<Expr>,
     },
     Number(usize),
 }
 
-pub enum BinaryOperator {
+pub enum Stmt {
+    Expr(Box<Expr>),
+}
+
+pub enum BinOp {
     ADD,
     SUB,
     MUL,
@@ -30,6 +36,7 @@ pub enum BinaryOperator {
 
 pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
+    position: Position,
 }
 
 impl<T> Parser<T>
@@ -37,17 +44,18 @@ where
     T: Iterator<Item = Token>,
 {
     pub fn new(tokens: Peekable<T>) -> Self {
-        Parser { tokens }
+        Parser {
+            tokens,
+            position: Position { line: 0, column: 0 },
+        }
     }
 
     fn peek<'a>(&mut self) -> Result<Token> {
         if let Some(tok) = self.tokens.peek() {
+            self.position = tok.position;
             Ok(tok.clone())
         } else {
-            Err(SyntaxError {
-                pos: crate::position::Position { line: 0, column: 0 },
-                msg: "unexpected eof".to_string(),
-            })
+            Err(self.error("unexpected eof".to_string()))
         }
     }
 
@@ -57,17 +65,29 @@ where
             self.tokens.next();
             return Ok(());
         }
-        return Err(SyntaxError {
-            pos: tok.position,
-            msg: format!("expected {}", kind),
-        });
+        return Err(self.error(format!("expected {}", kind)));
     }
 
-    pub fn expr(&mut self) -> Result<Node> {
+    pub fn stmts(&mut self) -> Result<Vec<Stmt>> {
+        let mut s = vec![];
+        while self.peek()?.kind != EOF {
+            s.push(self.stmt()?);
+        }
+        Ok(s)
+    }
+
+    // expr-statement =  expr ';'
+    fn stmt(&mut self) -> Result<Stmt> {
+        let expr = self.expr()?;
+        self.expect(SEMICOLON)?;
+        Ok(Stmt::Expr(expr.into()))
+    }
+
+    fn expr(&mut self) -> Result<Expr> {
         self.equality()
     }
 
-    fn equality(&mut self) -> Result<Node> {
+    fn equality(&mut self) -> Result<Expr> {
         let mut node = self.relational()?;
 
         loop {
@@ -75,16 +95,16 @@ where
             match tok.kind {
                 EQ => {
                     self.expect(EQ)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::EQ,
+                    node = Expr::Binary {
+                        op: BinOp::EQ,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 NEQ => {
                     self.expect(NEQ)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::NE,
+                    node = Expr::Binary {
+                        op: BinOp::NE,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
@@ -94,40 +114,40 @@ where
         }
     }
 
-    fn relational(&mut self) -> Result<Node> {
-        let  mut node = self.add()?;
+    fn relational(&mut self) -> Result<Expr> {
+        let mut node = self.add()?;
 
         loop {
             let tok = self.peek()?;
             match tok.kind {
                 LSS => {
                     self.expect(LSS)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::LT,
+                    node = Expr::Binary {
+                        op: BinOp::LT,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 LEQ => {
                     self.expect(LEQ)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::LE,
+                    node = Expr::Binary {
+                        op: BinOp::LE,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 GTR => {
                     self.expect(GTR)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::LT,
+                    node = Expr::Binary {
+                        op: BinOp::LT,
                         lhs: self.add()?.into(),
                         rhs: node.into(),
                     };
                 }
                 GEQ => {
                     self.expect(GEQ)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::LE,
+                    node = Expr::Binary {
+                        op: BinOp::LE,
                         lhs: self.add()?.into(),
                         rhs: node.into(),
                     };
@@ -137,7 +157,7 @@ where
         }
     }
 
-    pub fn add(&mut self) -> Result<Node> {
+    pub fn add(&mut self) -> Result<Expr> {
         let mut node = self.mul()?;
 
         loop {
@@ -145,16 +165,16 @@ where
             match tok.kind {
                 Add => {
                     self.expect(Add)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::ADD,
+                    node = Expr::Binary {
+                        op: BinOp::ADD,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
                     };
                 }
                 Sub => {
                     self.expect(Sub)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::SUB,
+                    node = Expr::Binary {
+                        op: BinOp::SUB,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
                     };
@@ -164,7 +184,7 @@ where
         }
     }
 
-    fn unary(&mut self) -> Result<Node> {
+    fn unary(&mut self) -> Result<Expr> {
         let tok = self.peek()?;
         match tok.kind {
             Add => {
@@ -173,8 +193,8 @@ where
             }
             Sub => {
                 self.expect(Sub)?;
-                return Ok(Node::Unay {
-                    op: BinaryOperator::SUB,
+                return Ok(Expr::Unay {
+                    op: BinOp::SUB,
                     expr: self.unary()?.into(),
                 });
             }
@@ -183,31 +203,31 @@ where
         self.primary_expr()
     }
 
-    fn primary_expr(&mut self) -> Result<Node> {
+    fn primary_expr(&mut self) -> Result<Expr> {
         let tok = self.peek()?;
-        if tok.kind == LParen {
-            self.expect(LParen)?;
-            let expr = self.expr()?;
-            self.expect(RParen)?;
-            return Ok(expr);
+        match tok.kind {
+            LParen => {
+                self.expect(LParen)?;
+                let expr = self.expr()?;
+                self.expect(RParen)?;
+                return Ok(expr);
+            }
+            Number => {
+                //"".parse::<usize>().map_err(|_err| {
+                //   SyntaxError{
+                //        pos: tok.position,
+                //        msg: "invalid number".to_string(),
+                //    }
+                //})?
+                let num = tok.num;
+                self.expect(Number)?;
+                return Ok(Expr::Number(num));
+            }
+            _ => Err(self.error(format!("expected expresssion"))),
         }
-
-        if tok.kind == Number {
-            //"".parse::<usize>().map_err(|_err| {
-            //   SyntaxError{
-            //        pos: tok.position,
-            //        msg: "invalid number".to_string(),
-            //    }
-            //})?
-            let num = tok.num;
-            self.expect(Number)?;
-            return Ok(Node::Number(num));
-        }
-
-        Err(self.error(format!("expected expresssion")))
     }
 
-    fn mul(&mut self) -> Result<Node> {
+    fn mul(&mut self) -> Result<Expr> {
         let mut node = self.unary()?;
 
         loop {
@@ -215,16 +235,16 @@ where
             match tok.kind {
                 Mul => {
                     self.expect(Mul)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::MUL,
+                    node = Expr::Binary {
+                        op: BinOp::MUL,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
                     };
                 }
                 Div => {
                     self.expect(Div)?;
-                    node = Node::Binary {
-                        op: BinaryOperator::DIV,
+                    node = Expr::Binary {
+                        op: BinOp::DIV,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
                     };
@@ -235,6 +255,9 @@ where
     }
 
     fn error(&self, msg: String) -> SyntaxError {
-        todo!()
+        SyntaxError {
+            pos: self.position,
+            msg: msg,
+        }
     }
 }

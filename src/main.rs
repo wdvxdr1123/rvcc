@@ -1,13 +1,15 @@
 use std::{env::args, error::Error};
 
 use error::{error_at, Result};
-use parser::Node;
+use parser::{Expr, Stmt};
 use scanner::Scanner;
 
 mod error;
 mod parser;
 mod position;
 mod scanner;
+
+const DEBUG: bool = false;
 
 fn main() -> std::result::Result<(), Box<dyn Error>> {
     let args = args().collect::<Vec<String>>();
@@ -27,12 +29,18 @@ fn main() -> std::result::Result<(), Box<dyn Error>> {
 
 fn compile(s: String) -> Result<()> {
     let mut s = Scanner::new(s.chars().peekable());
-    let tokens = s.scan()?.into_iter().peekable();
-    let p = parser::Parser::new(tokens).expr()?;
+    let tokens = s.scan()?;
+    if DEBUG {
+        // print token stream in debug mode
+        for tok in tokens.iter() {
+            println!("{}", tok.kind);
+        }
+    }
+    let p = parser::Parser::new(tokens.into_iter().peekable()).stmts()?;
 
     println!("  .global main");
     println!("main:");
-    gen_expr(p)?;
+    stmts(p)?;
     println!("  ret");
     Ok(())
 }
@@ -47,30 +55,30 @@ fn pop(reg: &str) {
     println!("  addi sp, sp, 8");
 }
 
-fn gen_expr(expr: Node) -> Result<()> {
+fn gen_expr(expr: Expr) -> Result<()> {
     match expr {
-        Node::Number(n) => {
+        Expr::Number(n) => {
             println!("  li a0, {}", n);
             Ok(())
         }
-        Node::Unay { op, expr } => {
+        Expr::Unay { op, expr } => {
             gen_expr(*expr)?;
             match op {
-                parser::BinaryOperator::SUB => {
+                parser::BinOp::SUB => {
                     println!("  sub a0, x0, a0");
                 }
-                parser::BinaryOperator::ADD => {}
+                parser::BinOp::ADD => {}
                 _ => unreachable!(),
             }
             Ok(())
         }
-        Node::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs } => {
             gen_expr(*lhs)?;
             push();
             gen_expr(*rhs)?;
             pop("a1");
 
-            use parser::BinaryOperator::*;
+            use parser::BinOp::*;
             match op {
                 ADD => println!("  add a0, a1, a0"),
                 SUB => println!("  sub a0, a1, a0"),
@@ -80,18 +88,30 @@ fn gen_expr(expr: Node) -> Result<()> {
                 LE => {
                     println!("  sub a0, a1, a0");
                     println!("  slti a0, a0, 1");
-                },
+                }
                 EQ => {
                     println!("  sub a0, a1, a0");
                     println!("  sltiu a0, a0, 1");
-                },
+                }
                 NE => {
                     println!("  sub a0, a1, a0");
                     println!("  sltu a0, x0, a0");
-                },
+                }
             };
 
             Ok(())
         }
     }
+}
+
+fn stmts(ss: Vec<Stmt>) -> Result<()> {
+    for s in ss {
+        stmt(s)?;
+    }
+    Ok(())
+}
+
+fn stmt(s: Stmt) -> Result<()> {
+    let Stmt::Expr(expr) = s;
+    gen_expr(*expr)
 }

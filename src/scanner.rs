@@ -23,7 +23,8 @@ pub enum TokenKind {
 
     Assign, // =
 
-    NOT, // !
+    NOT,       // !
+    SEMICOLON, // ;
 
     Number,
     EOF,
@@ -85,12 +86,12 @@ impl<'a> Scanner<'a> {
         let tok: TokenKind = loop {
             let ch = self.p.peek();
             if ch.is_none() {
-                break Invalid;
+                break EOF;
             }
             match ch.unwrap() {
                 '\n' => {
                     self.next_char();
-                    self.line = self.line +1;
+                    self.line = self.line + 1;
                     self.col = 0;
                     continue;
                 }
@@ -99,7 +100,7 @@ impl<'a> Scanner<'a> {
                     self.next_char();
                     continue;
                 }
-                c @ ('+' | '-' | '*' | '/' | '(' | ')') => {
+                c @ ('+' | '-' | '*' | '/' | '(' | ')' | ';') => {
                     let tok = match *c {
                         '+' => Add,
                         '-' => Sub,
@@ -107,6 +108,7 @@ impl<'a> Scanner<'a> {
                         '/' => Div,
                         '(' => LParen,
                         ')' => RParen,
+                        ';' => SEMICOLON,
                         _ => unreachable!(),
                     };
                     self.next_char();
