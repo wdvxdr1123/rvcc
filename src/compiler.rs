@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::error::{Result, SyntaxError};
-use crate::parser::{self, Expr, Node, Stmt};
+use crate::parser::{self, Expr, Node, Stmt, UnaryOp};
 use crate::position::Position;
 
 #[derive(Default)]
@@ -69,8 +69,8 @@ impl Compiler {
     fn compute_lval_offset(&mut self) {
         let mut offset = 0;
         for o in self.func.objs.iter_mut() {
-            o.offset = offset;
             offset = offset + 8;
+            o.offset = offset;
         }
         self.func.stack_size = align_to(offset, 16);
     }
@@ -92,14 +92,22 @@ impl Compiler {
                 println!("  li a0, {}", value);
                 Ok(())
             }
-            Expr::Unary { op, expr, .. } => {
-                self.gen_expr(*expr)?;
+            Expr::Unary {
+                op, expr: _expr, ..
+            } => {
+                if op == UnaryOp::ADDR {
+                    return self.gen_addr(*_expr);
+                }
+                self.gen_expr(*_expr)?;
                 match op {
-                    parser::BinOp::SUB => {
+                    UnaryOp::POSITIVE => {}
+                    UnaryOp::NEGATIVE => {
                         // a0 = 0 - a0
                         println!("  sub a0, x0, a0");
                     }
-                    parser::BinOp::ADD => {}
+                    UnaryOp::DEREF => {
+                        println!("  ld a0, (a0)");
+                    }
                     _ => self.error("invalid unary operator")?,
                 }
                 Ok(())
@@ -143,7 +151,7 @@ impl Compiler {
                 push();
                 self.gen_expr(*rhs)?;
                 pop("a1");
-                println!("sd a0, (a1)");
+                println!("  sd a0, (a1)");
                 Ok(())
             }
         }
@@ -220,10 +228,16 @@ impl Compiler {
             Expr::Ident { name, .. } => {
                 for i in self.func.objs.iter() {
                     if i.name == name {
-                        println!("  addi a0, a3, -{}", i.offset);
+                        println!("  addi a0, a3, {}", i.offset as isize - self.func.stack_size as isize);
                     }
                 }
                 Ok(())
+            },
+            Expr::Unary { op,expr,..} => {
+                if op != UnaryOp::DEREF {
+                    return self.error("is not addressable");
+                }
+                self.gen_expr(*expr)
             }
             _ => self.error("is not addressable"),
         }

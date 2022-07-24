@@ -10,7 +10,7 @@ pub trait Node {
     fn pos(&self) -> Position;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Binary {
         // lhs op rhs
@@ -20,7 +20,7 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Unary {
-        op: BinOp,
+        op: UnaryOp,
         pos: Position,
         expr: Box<Expr>,
     },
@@ -51,7 +51,7 @@ impl Node for Expr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Expr {
         expr: Box<Expr>,
@@ -100,7 +100,7 @@ impl Node for Stmt {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinOp {
     ADD,
     SUB,
@@ -110,6 +110,14 @@ pub enum BinOp {
     LE,
     EQ,
     NE,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UnaryOp {
+    POSITIVE,
+    NEGATIVE,
+    DEREF,
+    ADDR,
 }
 
 pub struct Parser<T: Iterator<Item = Token>> {
@@ -413,8 +421,8 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                Add => {
-                    let pos = self.expect(Add)?;
+                ADD => {
+                    let pos = self.expect(ADD)?;
                     node = Expr::Binary {
                         op: BinOp::ADD,
                         pos,
@@ -422,8 +430,8 @@ where
                         rhs: self.mul()?.into(),
                     };
                 }
-                Sub => {
-                    let pos = self.expect(Sub)?;
+                SUB => {
+                    let pos = self.expect(SUB)?;
                     node = Expr::Binary {
                         op: BinOp::SUB,
                         pos,
@@ -439,18 +447,18 @@ where
     fn unary(&mut self) -> Result<Expr> {
         let tok = self.peek()?;
         match tok.kind {
-            Add => {
-                let pos = self.expect(Add)?;
+            k @ (ADD | SUB | MUL | AND) => {
+                let pos = self.expect(k)?;
+                let op = match k {
+                    ADD => UnaryOp::POSITIVE,
+                    SUB => UnaryOp::NEGATIVE,
+                    MUL => UnaryOp::DEREF,
+                    AND => UnaryOp::ADDR,
+                    _ => unreachable!(),
+                };
+
                 return Ok(Expr::Unary {
-                    op: BinOp::ADD,
-                    pos,
-                    expr: self.unary()?.into(),
-                });
-            }
-            Sub => {
-                let pos = self.expect(Sub)?;
-                return Ok(Expr::Unary {
-                    op: BinOp::SUB,
+                    op,
                     pos,
                     expr: self.unary()?.into(),
                 });
@@ -495,8 +503,8 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                Mul => {
-                    let pos = self.expect(Mul)?;
+                MUL => {
+                    let pos = self.expect(MUL)?;
                     node = Expr::Binary {
                         op: BinOp::MUL,
                         pos,

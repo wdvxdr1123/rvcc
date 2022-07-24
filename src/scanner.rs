@@ -19,9 +19,9 @@ pub enum TokenKind {
     IDENT,
     NUMBER,
 
-    Add, // +
-    Sub, // -
-    Mul, // *
+    ADD, // +
+    SUB, // -
+    MUL, // *
     Div, // /
 
     LPAREN, // (
@@ -43,6 +43,9 @@ pub enum TokenKind {
 
     NOT,       // !
     SEMICOLON, // ;
+
+    AND,
+    ANDAND,
 
     // keywords
     RETURN,
@@ -136,9 +139,9 @@ impl<'a> Scanner<'a> {
                 }
                 c @ ('+' | '-' | '*' | '/' | ';') => {
                     let tok = match *c {
-                        '+' => Add,
-                        '-' => Sub,
-                        '*' => Mul,
+                        '+' => ADD,
+                        '-' => SUB,
+                        '*' => MUL,
                         '/' => Div,
                         ';' => SEMICOLON,
                         _ => unreachable!(),
@@ -161,6 +164,10 @@ impl<'a> Scanner<'a> {
                 '!' => {
                     self.next_char();
                     break self.switch2(NOT, '=', NEQ);
+                }
+                '&' => {
+                    self.next_char();
+                    break self.switch2(AND, '&', ANDAND);
                 }
                 '0'..='9' => break self.number(),
                 _ => {
