@@ -8,6 +8,7 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "return" => TokenKind::RETURN,
     "if" => TokenKind::IF,
     "else" => TokenKind::ELSE,
+    "for" => TokenKind::FOR,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -46,6 +47,7 @@ pub enum TokenKind {
     RETURN,
     IF,
     ELSE,
+    FOR,
 
     EOF,
 }

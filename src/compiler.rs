@@ -15,7 +15,7 @@ pub struct Object {
 
 pub struct Compiler {
     pub func: Func,
-    pub if_count: usize,
+    label_index: usize,
 }
 
 fn push() {
@@ -33,6 +33,13 @@ fn align_to(n: usize, align: usize) -> usize {
 }
 
 impl Compiler {
+    pub fn new(func: Func) -> Self {
+        Compiler {
+            func,
+            label_index: 0,
+        }
+    }
+
     pub fn compile(&mut self) -> Result<()> {
         self.compute_lval_offset();
 
@@ -61,6 +68,12 @@ impl Compiler {
             offset = offset + 8;
         }
         self.func.stack_size = align_to(offset, 16);
+    }
+
+    fn count(&mut self) -> usize {
+        let c = self.label_index;
+        self.label_index = c + 1;
+        c
     }
 
     fn gen_expr(&mut self, expr: Expr) -> Result<()> {
@@ -144,8 +157,7 @@ impl Compiler {
             Stmt::Block(stmts) => self.stmts(stmts),
             Stmt::None => Ok(()),
             Stmt::If { cond, then, r#else } => {
-                let c = self.if_count;
-                self.if_count = self.if_count + 1;
+                let c = self.count();
 
                 self.gen_expr(*cond)?;
                 println!("  beqz a0, .L.else.{}", c);
@@ -156,6 +168,31 @@ impl Compiler {
                     self.stmt(*els)?;
                 }
                 println!(".L.end.{}:", c);
+                Ok(())
+            }
+            Stmt::For {
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                let c = self.count();
+
+                self.stmt(*init)?;
+                println!(".L.start.{}:", c);
+                if let Some(cond) = cond {
+                    self.gen_expr(*cond)?;
+                    println!("  beqz a0, .L.end.{}", c);
+                }
+                
+                self.stmt(*body)?;
+
+                if let Some(post) = post {
+                    self.gen_expr(*post)?;
+                }
+
+                println!("  j .L.start.{}", c);
+                println!(".L.end.{}:",c );
                 Ok(())
             }
         }

@@ -36,6 +36,13 @@ pub enum Stmt {
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
     },
+    For {
+        init: Box<Stmt>,
+        cond: Option<Box<Expr>>,
+        post: Option<Box<Expr>>,
+
+        body: Box<Stmt>,
+    },
     None,
 }
 
@@ -119,18 +126,20 @@ where
 
     // stmt = "return" expr ";"
     //      | "if" "(" expr ")" stmt ("else" stmt)?
+    //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
     //      | compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> Result<Stmt> {
         let tok = self.peek()?;
         match tok.kind {
-            // return-stmt = "return" expr ";"
+            // "return" expr ";"
             RETURN => {
                 self.expect(RETURN)?;
                 let expr = self.expr()?;
                 self.expect(SEMICOLON)?;
                 return Ok(Stmt::Return(expr.into()));
             }
+            // "if" "(" expr ")" stmt ("else" stmt)?
             IF => {
                 self.expect(IF)?;
                 self.expect(LPAREN)?;
@@ -149,6 +158,35 @@ where
                     cond: cond.into(),
                     then: then.into(),
                     r#else: els,
+                })
+            }
+            // "for" "(" expr-stmt expr? ";" expr? ")" stmt
+            FOR => {
+                self.expect(FOR)?;
+                self.expect(LPAREN)?;
+                let init = self.expr_stmt()?;
+
+                let cond = if self.peek()?.kind != SEMICOLON {
+                    Some(Box::new(self.expr()?))
+                } else {
+                    None
+                };
+                self.expect(SEMICOLON)?;
+
+                let post = if self.peek()?.kind != RPAREN {
+                    Some(Box::new(self.expr()?))
+                } else {
+                    None
+                };
+                self.expect(RPAREN)?;
+
+                let body = self.stmt()?;
+
+                Ok(Stmt::For {
+                    init: init.into(),
+                    cond,
+                    post,
+                    body: body.into(),
                 })
             }
             LBRACE => Ok(Stmt::Block(self.compound_stmt()?)),
