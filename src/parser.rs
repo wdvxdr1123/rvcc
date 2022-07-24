@@ -6,44 +6,98 @@ use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
 
+pub trait Node {
+    fn pos(&self) -> Position;
+}
+
 #[derive(Clone)]
 pub enum Expr {
     Binary {
         // lhs op rhs
         op: BinOp,
+        pos: Position,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-    Unay {
+    Unary {
         op: BinOp,
+        pos: Position,
         expr: Box<Expr>,
     },
-    Number(usize),
-    Ident(String),
+    Number {
+        pos: Position,
+        value: usize,
+    },
+    Ident {
+        pos: Position,
+        name: String,
+    },
     Assign {
         lhs: Box<Expr>,
+        pos: Position,
         rhs: Box<Expr>,
     },
 }
 
+impl Node for Expr {
+    fn pos(&self) -> Position {
+        match self {
+            Self::Binary { pos, .. } => pos.clone(),
+            Self::Unary { pos, .. } => pos.clone(),
+            Self::Number { pos, .. } => pos.clone(),
+            Self::Ident { pos, .. } => pos.clone(),
+            Self::Assign { pos, .. } => pos.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Stmt {
-    Expr(Box<Expr>),
-    Return(Box<Expr>),
-    Block(Vec<Stmt>),
+    Expr {
+        expr: Box<Expr>,
+        semicolon: Position,
+    },
+    Return {
+        pos: Position,
+        expr: Box<Expr>,
+        semicolon: Position,
+    },
+    Block {
+        lbrace: Position,
+        rbrace: Position,
+        body: Vec<Stmt>,
+    },
     If {
+        pos: Position,
+        lparen: Position,
         cond: Box<Expr>,
+        rparen: Position,
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
     },
     For {
+        pos: Position,
+        lparen: Position,
         init: Option<Box<Stmt>>,
         cond: Option<Box<Expr>>,
         post: Option<Box<Expr>>,
-
+        rparen: Position,
         body: Box<Stmt>,
     },
-    None,
+    None(Position),
+}
+
+impl Node for Stmt {
+    fn pos(&self) -> Position {
+        match self {
+            Stmt::Expr { expr, .. } => expr.pos(),
+            Stmt::Block { lbrace, .. } => lbrace.clone(),
+            Stmt::Return { pos, .. } => pos.clone(),
+            Stmt::If { pos, .. } => pos.clone(),
+            Stmt::For { pos, .. } => pos.clone(),
+            Stmt::None(pos) => pos.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -85,11 +139,11 @@ where
         }
     }
 
-    fn expect(&mut self, kind: TokenKind) -> Result<()> {
+    fn expect(&mut self, kind: TokenKind) -> Result<Position> {
         let tok = self.peek()?;
         if tok.kind == kind {
             self.tokens.next();
-            return Ok(());
+            return Ok(tok.position);
         }
         return Err(self.error(format!("expected {}", kind)));
     }
@@ -135,19 +189,25 @@ where
         match tok.kind {
             // "return" expr ";"
             RETURN => {
-                self.expect(RETURN)?;
-                let expr = self.expr()?;
-                self.expect(SEMICOLON)?;
-                return Ok(Stmt::Return(expr.into()));
+                let pos = self.expect(RETURN)?;
+                let expr = Box::new(self.expr()?);
+                let semi = self.expect(SEMICOLON)?;
+                return Ok(Stmt::Return {
+                    pos,
+                    expr,
+                    semicolon: semi,
+                });
             }
             // "if" "(" expr ")" stmt ("else" stmt)?
             IF => {
-                self.expect(IF)?;
-                self.expect(LPAREN)?;
-                let cond = self.expr()?;
-                self.expect(RPAREN)?;
+                let pos = self.expect(IF)?;
 
-                let then = self.stmt()?;
+                let lparen = self.expect(LPAREN)?;
+                let cond = Box::new(self.expr()?);
+                let rparen = self.expect(RPAREN)?;
+
+                let then = Box::new(self.stmt()?);
+
                 let els = if self.peek()?.kind == ELSE {
                     self.expect(ELSE)?;
                     Some(Box::new(self.stmt()?))
@@ -156,16 +216,19 @@ where
                 };
 
                 Ok(Stmt::If {
-                    cond: cond.into(),
-                    then: then.into(),
+                    pos,
+                    lparen,
+                    cond,
+                    rparen,
+                    then,
                     r#else: els,
                 })
             }
             // "for" "(" expr-stmt expr? ";" expr? ")" stmt
             FOR => {
-                self.expect(FOR)?;
-                self.expect(LPAREN)?;
-                let init = self.expr_stmt()?;
+                let pos = self.expect(FOR)?;
+                let lparen = self.expect(LPAREN)?;
+                let init = Box::new(self.expr_stmt()?);
 
                 let cond = if self.peek()?.kind != SEMICOLON {
                     Some(Box::new(self.expr()?))
@@ -179,42 +242,48 @@ where
                 } else {
                     None
                 };
-                self.expect(RPAREN)?;
+                let rparen = self.expect(RPAREN)?;
 
-                let body = self.stmt()?;
+                let body = Box::new(self.stmt()?);
 
                 Ok(Stmt::For {
+                    pos,
+                    lparen,
                     init: Some(init.into()),
                     cond,
                     post,
-                    body: body.into(),
+                    rparen,
+                    body,
                 })
             }
             // "while" "(" expr ")" stmt
             WHILE => {
-                self.expect(WHILE)?;
+                let pos = self.expect(WHILE)?;
 
-                self.expect(LPAREN)?;
+                let lparen = self.expect(LPAREN)?;
                 let cond = self.expr()?;
-                self.expect(RPAREN)?;
+                let rparen = self.expect(RPAREN)?;
 
-                let body = self.stmt()?;
+                let body = Box::new(self.stmt()?);
 
                 Ok(Stmt::For {
+                    pos,
+                    lparen,
                     init: None,
                     cond: Some(cond.into()),
                     post: None,
-                    body: body.into(),
+                    rparen,
+                    body,
                 })
             }
-            LBRACE => Ok(Stmt::Block(self.compound_stmt()?)),
+            LBRACE => self.compound_stmt(),
             _ => self.expr_stmt(),
         }
     }
 
     // compound-stmt = "{" stmt* "}"
-    fn compound_stmt(&mut self) -> Result<Vec<Stmt>> {
-        self.expect(LBRACE)?;
+    fn compound_stmt(&mut self) -> Result<Stmt> {
+        let lbrace = self.expect(LBRACE)?;
 
         let mut stmt = vec![];
         loop {
@@ -223,20 +292,26 @@ where
                 _ => stmt.push(self.stmt()?),
             }
         }
-        self.expect(RBRACE)?;
-        Ok(stmt)
+        let rbrace = self.expect(RBRACE)?;
+        Ok(Stmt::Block {
+            lbrace,
+            rbrace,
+            body: stmt,
+        })
     }
 
     // expr-stmt =  expr? ';'
     fn expr_stmt(&mut self) -> Result<Stmt> {
         if self.peek()?.kind == SEMICOLON {
-            self.expect(SEMICOLON)?;
-            return Ok(Stmt::None);
+            let pos = self.expect(SEMICOLON)?;
+            return Ok(Stmt::None(pos));
         }
 
         let expr = self.expr()?;
-        self.expect(SEMICOLON)?;
-        Ok(Stmt::Expr(expr.into()))
+        Ok(Stmt::Expr {
+            expr: expr.into(),
+            semicolon: self.expect(SEMICOLON)?,
+        })
     }
 
     fn expr(&mut self) -> Result<Expr> {
@@ -246,9 +321,10 @@ where
     fn assign(&mut self) -> Result<Expr> {
         let mut expr = self.equality()?;
         if self.peek()?.kind == Assign {
-            self.expect(Assign)?;
+            let pos = self.expect(Assign)?;
             expr = Expr::Assign {
                 lhs: expr.into(),
+                pos,
                 rhs: self.assign()?.into(),
             }
         }
@@ -262,17 +338,19 @@ where
             let tok = self.peek()?;
             match tok.kind {
                 EQ => {
-                    self.expect(EQ)?;
+                    let pos = self.expect(EQ)?;
                     node = Expr::Binary {
                         op: BinOp::EQ,
+                        pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 NEQ => {
-                    self.expect(NEQ)?;
+                    let pos = self.expect(NEQ)?;
                     node = Expr::Binary {
                         op: BinOp::NE,
+                        pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
@@ -289,33 +367,37 @@ where
             let tok = self.peek()?;
             match tok.kind {
                 LSS => {
-                    self.expect(LSS)?;
+                    let pos = self.expect(LSS)?;
                     node = Expr::Binary {
                         op: BinOp::LT,
+                        pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 LEQ => {
-                    self.expect(LEQ)?;
+                    let pos = self.expect(LEQ)?;
                     node = Expr::Binary {
                         op: BinOp::LE,
+                        pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
                     };
                 }
                 GTR => {
-                    self.expect(GTR)?;
+                    let pos = self.expect(GTR)?;
                     node = Expr::Binary {
                         op: BinOp::LT,
+                        pos,
                         lhs: self.add()?.into(),
                         rhs: node.into(),
                     };
                 }
                 GEQ => {
-                    self.expect(GEQ)?;
+                    let pos = self.expect(GEQ)?;
                     node = Expr::Binary {
                         op: BinOp::LE,
+                        pos,
                         lhs: self.add()?.into(),
                         rhs: node.into(),
                     };
@@ -332,17 +414,19 @@ where
             let tok = self.peek()?;
             match tok.kind {
                 Add => {
-                    self.expect(Add)?;
+                    let pos = self.expect(Add)?;
                     node = Expr::Binary {
                         op: BinOp::ADD,
+                        pos,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
                     };
                 }
                 Sub => {
-                    self.expect(Sub)?;
+                    let pos = self.expect(Sub)?;
                     node = Expr::Binary {
                         op: BinOp::SUB,
+                        pos,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
                     };
@@ -356,13 +440,18 @@ where
         let tok = self.peek()?;
         match tok.kind {
             Add => {
-                self.expect(Add)?;
-                return self.unary();
+                let pos = self.expect(Add)?;
+                return Ok(Expr::Unary {
+                    op: BinOp::ADD,
+                    pos,
+                    expr: self.unary()?.into(),
+                });
             }
             Sub => {
-                self.expect(Sub)?;
-                return Ok(Expr::Unay {
+                let pos = self.expect(Sub)?;
+                return Ok(Expr::Unary {
                     op: BinOp::SUB,
+                    pos,
                     expr: self.unary()?.into(),
                 });
             }
@@ -381,17 +470,20 @@ where
                 return Ok(expr);
             }
             NUMBER => {
-                self.expect(NUMBER)?;
-                let num = tok.literal.parse::<usize>().map_err(|_err| SyntaxError {
-                    pos: tok.position,
-                    msg: "invalid number".to_string(),
-                })?;
-                return Ok(Expr::Number(num));
+                let pos = self.expect(NUMBER)?;
+                let value = tok
+                    .literal
+                    .parse::<usize>()
+                    .map_err(|_err| self.error("invalid number".to_string()))?;
+                return Ok(Expr::Number { pos, value });
             }
             IDENT => {
-                self.expect(IDENT)?;
+                let pos = self.expect(IDENT)?;
                 self.ident(&tok.literal);
-                return Ok(Expr::Ident(tok.literal));
+                return Ok(Expr::Ident {
+                    pos,
+                    name: tok.literal,
+                });
             }
             _ => Err(self.error(format!("expected expresssion"))),
         }
@@ -404,17 +496,19 @@ where
             let tok = self.peek()?;
             match tok.kind {
                 Mul => {
-                    self.expect(Mul)?;
+                    let pos = self.expect(Mul)?;
                     node = Expr::Binary {
                         op: BinOp::MUL,
+                        pos,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
                     };
                 }
                 Div => {
-                    self.expect(Div)?;
+                    let pos = self.expect(Div)?;
                     node = Expr::Binary {
                         op: BinOp::DIV,
+                        pos,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
                     };

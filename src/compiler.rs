@@ -1,5 +1,8 @@
-use crate::error::Result;
-use crate::parser::{self, Expr, Stmt};
+use std::fmt;
+
+use crate::error::{Result, SyntaxError};
+use crate::parser::{self, Expr, Node, Stmt};
+use crate::position::Position;
 
 #[derive(Default)]
 pub struct Func {
@@ -16,6 +19,7 @@ pub struct Object {
 pub struct Compiler {
     pub func: Func,
     label_index: usize,
+    pos: Position,
 }
 
 fn push() {
@@ -37,6 +41,7 @@ impl Compiler {
         Compiler {
             func,
             label_index: 0,
+            pos: Position::no_postion(),
         }
     }
 
@@ -76,13 +81,18 @@ impl Compiler {
         c
     }
 
+    fn set_position<T: Node>(&mut self, n: &T) {
+        self.pos = n.pos();
+    }
+
     fn gen_expr(&mut self, expr: Expr) -> Result<()> {
+        self.set_position(&expr);
         match expr {
-            Expr::Number(n) => {
-                println!("  li a0, {}", n);
+            Expr::Number { value, .. } => {
+                println!("  li a0, {}", value);
                 Ok(())
             }
-            Expr::Unay { op, expr } => {
+            Expr::Unary { op, expr, .. } => {
                 self.gen_expr(*expr)?;
                 match op {
                     parser::BinOp::SUB => {
@@ -90,11 +100,11 @@ impl Compiler {
                         println!("  sub a0, x0, a0");
                     }
                     parser::BinOp::ADD => {}
-                    _ => unreachable!(),
+                    _ => self.error("invalid unary operator")?,
                 }
                 Ok(())
             }
-            Expr::Binary { op, lhs, rhs } => {
+            Expr::Binary { op, lhs, rhs, .. } => {
                 self.gen_expr(*lhs)?;
                 push();
                 self.gen_expr(*rhs)?;
@@ -123,12 +133,12 @@ impl Compiler {
 
                 Ok(())
             }
-            Expr::Ident(_) => {
+            Expr::Ident { .. } => {
                 self.gen_addr(expr)?;
                 println!("  ld a0, (a0)");
                 Ok(())
             }
-            Expr::Assign { lhs, rhs } => {
+            Expr::Assign { lhs, rhs, .. } => {
                 self.gen_addr(*lhs)?;
                 push();
                 self.gen_expr(*rhs)?;
@@ -147,16 +157,19 @@ impl Compiler {
     }
 
     fn stmt(&mut self, s: Stmt) -> Result<()> {
+        self.set_position(&s);
         match s {
-            Stmt::Expr(expr) => self.gen_expr(*expr),
-            Stmt::Return(expr) => {
+            Stmt::Expr { expr, .. } => self.gen_expr(*expr),
+            Stmt::Return { expr, .. } => {
                 self.gen_expr(*expr)?;
                 println!("  j .L.return");
                 Ok(())
             }
-            Stmt::Block(stmts) => self.stmts(stmts),
-            Stmt::None => Ok(()),
-            Stmt::If { cond, then, r#else } => {
+            Stmt::Block { body, .. } => self.stmts(body),
+            Stmt::None(_) => Ok(()),
+            Stmt::If {
+                cond, then, r#else, ..
+            } => {
                 let c = self.count();
 
                 self.gen_expr(*cond)?;
@@ -175,6 +188,7 @@ impl Compiler {
                 cond,
                 post,
                 body,
+                ..
             } => {
                 let c = self.count();
                 // while statement does not have init
@@ -201,8 +215,9 @@ impl Compiler {
     }
 
     fn gen_addr(&mut self, e: Expr) -> Result<()> {
+        self.set_position(&e);
         match e {
-            Expr::Ident(name) => {
+            Expr::Ident { name, .. } => {
                 for i in self.func.objs.iter() {
                     if i.name == name {
                         println!("  addi a0, a3, -{}", i.offset);
@@ -210,7 +225,14 @@ impl Compiler {
                 }
                 Ok(())
             }
-            _ => todo!(),
+            _ => self.error("is not addressable"),
         }
+    }
+
+    fn error<T, V: fmt::Display>(&self, msg: V) -> Result<T> {
+        Err(SyntaxError {
+            pos: self.pos,
+            msg: msg.to_string(),
+        })
     }
 }
