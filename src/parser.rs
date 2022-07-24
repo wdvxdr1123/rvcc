@@ -37,7 +37,7 @@ pub enum Stmt {
         r#else: Option<Box<Stmt>>,
     },
     For {
-        init: Box<Stmt>,
+        init: Option<Box<Stmt>>,
         cond: Option<Box<Expr>>,
         post: Option<Box<Expr>>,
 
@@ -127,6 +127,7 @@ where
     // stmt = "return" expr ";"
     //      | "if" "(" expr ")" stmt ("else" stmt)?
     //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
+    //      | "while" "(" expr ")" stmt
     //      | compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> Result<Stmt> {
@@ -183,9 +184,26 @@ where
                 let body = self.stmt()?;
 
                 Ok(Stmt::For {
-                    init: init.into(),
+                    init: Some(init.into()),
                     cond,
                     post,
+                    body: body.into(),
+                })
+            }
+            // "while" "(" expr ")" stmt
+            WHILE => {
+                self.expect(WHILE)?;
+
+                self.expect(LPAREN)?;
+                let cond = self.expr()?;
+                self.expect(RPAREN)?;
+
+                let body = self.stmt()?;
+
+                Ok(Stmt::For {
+                    init: None,
+                    cond: Some(cond.into()),
+                    post: None,
                     body: body.into(),
                 })
             }

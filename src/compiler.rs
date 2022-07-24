@@ -177,14 +177,16 @@ impl Compiler {
                 body,
             } => {
                 let c = self.count();
-
-                self.stmt(*init)?;
+                // while statement does not have init
+                if let Some(init) = init {
+                    self.stmt(*init)?;
+                }
                 println!(".L.start.{}:", c);
                 if let Some(cond) = cond {
                     self.gen_expr(*cond)?;
                     println!("  beqz a0, .L.end.{}", c);
                 }
-                
+
                 self.stmt(*body)?;
 
                 if let Some(post) = post {
@@ -192,7 +194,7 @@ impl Compiler {
                 }
 
                 println!("  j .L.start.{}", c);
-                println!(".L.end.{}:",c );
+                println!(".L.end.{}:", c);
                 Ok(())
             }
         }
