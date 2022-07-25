@@ -1,14 +1,19 @@
+use std::collections::binary_heap;
 use std::iter::Peekable;
+use std::rc::{self, Rc};
 
 use crate::compiler::{Func, Object};
 use crate::error::{Result, SyntaxError};
 use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
+use crate::typecheck::Type;
 
 pub trait Node {
     fn pos(&self) -> Position;
 }
+
+type Typ = Option<Rc<Type>>;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -18,25 +23,43 @@ pub enum Expr {
         pos: Position,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+        ty: Typ,
     },
     Unary {
         op: UnaryOp,
         pos: Position,
         expr: Box<Expr>,
+
+        ty: Typ,
     },
     Number {
         pos: Position,
         value: usize,
+        ty: Typ,
     },
     Ident {
         pos: Position,
         name: String,
+        ty: Typ,
     },
     Assign {
         lhs: Box<Expr>,
         pos: Position,
         rhs: Box<Expr>,
+        ty: Typ,
     },
+}
+
+impl Expr {
+    pub fn typecheck(&self) -> Option<Rc<Type>> {
+        match self {
+            Self::Binary { ty, .. } => ty.clone(),
+            Self::Unary { ty, .. } => ty.clone(),
+            Self::Number { ty, .. } => ty.clone(),
+            Self::Ident { ty, .. } => ty.clone(),
+            Self::Assign { ty, .. } => ty.clone(),
+        }
+    }
 }
 
 impl Node for Expr {
@@ -100,7 +123,7 @@ impl Node for Stmt {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BinOp {
     ADD,
     SUB,
@@ -334,6 +357,7 @@ where
                 lhs: expr.into(),
                 pos,
                 rhs: self.assign()?.into(),
+                ty: None,
             }
         }
         Ok(expr)
@@ -345,22 +369,14 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                EQ => {
-                    let pos = self.expect(EQ)?;
+                EQ | NEQ => {
+                    let pos = self.expect(tok.kind)?;
                     node = Expr::Binary {
-                        op: BinOp::EQ,
+                        op: if tok.kind == EQ { BinOp::EQ } else { BinOp::NE },
                         pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
-                    };
-                }
-                NEQ => {
-                    let pos = self.expect(NEQ)?;
-                    node = Expr::Binary {
-                        op: BinOp::NE,
-                        pos,
-                        lhs: node.into(),
-                        rhs: self.add()?.into(),
+                        ty: None,
                     };
                 }
                 _ => break Ok(node),
@@ -374,41 +390,33 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                LSS => {
-                    let pos = self.expect(LSS)?;
-                    node = Expr::Binary {
-                        op: BinOp::LT,
-                        pos,
-                        lhs: node.into(),
-                        rhs: self.add()?.into(),
+                LSS | LEQ | GTR | GEQ => {
+                    let pos = self.expect(tok.kind)?;
+                    let (op, swap) = match tok.kind {
+                        LSS => (BinOp::LT, false),
+                        LEQ => (BinOp::LE, false),
+                        GTR => (BinOp::LT, true),
+                        GEQ => (BinOp::LE, true),
+                        _ => unreachable!(),
                     };
-                }
-                LEQ => {
-                    let pos = self.expect(LEQ)?;
-                    node = Expr::Binary {
-                        op: BinOp::LE,
-                        pos,
-                        lhs: node.into(),
-                        rhs: self.add()?.into(),
-                    };
-                }
-                GTR => {
-                    let pos = self.expect(GTR)?;
-                    node = Expr::Binary {
-                        op: BinOp::LT,
-                        pos,
-                        lhs: self.add()?.into(),
-                        rhs: node.into(),
-                    };
-                }
-                GEQ => {
-                    let pos = self.expect(GEQ)?;
-                    node = Expr::Binary {
-                        op: BinOp::LE,
-                        pos,
-                        lhs: self.add()?.into(),
-                        rhs: node.into(),
-                    };
+
+                    if !swap {
+                        node = Expr::Binary {
+                            op,
+                            pos,
+                            lhs: node.into(),
+                            rhs: self.add()?.into(),
+                            ty: None,
+                        };
+                    } else {
+                        node = Expr::Binary {
+                            op,
+                            pos,
+                            lhs: self.add()?.into(),
+                            rhs: node.into(),
+                            ty: None,
+                        };
+                    }
                 }
                 _ => break Ok(node),
             }
@@ -421,22 +429,18 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                ADD => {
-                    let pos = self.expect(ADD)?;
+                ADD | SUB => {
+                    let pos = self.expect(tok.kind)?;
                     node = Expr::Binary {
-                        op: BinOp::ADD,
+                        op: if tok.kind == ADD {
+                            BinOp::ADD
+                        } else {
+                            BinOp::SUB
+                        },
                         pos,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
-                    };
-                }
-                SUB => {
-                    let pos = self.expect(SUB)?;
-                    node = Expr::Binary {
-                        op: BinOp::SUB,
-                        pos,
-                        lhs: node.into(),
-                        rhs: self.mul()?.into(),
+                        ty: None,
                     };
                 }
                 _ => break Ok(node),
@@ -461,6 +465,7 @@ where
                     op,
                     pos,
                     expr: self.unary()?.into(),
+                    ty: None,
                 });
             }
             _ => {}
@@ -483,7 +488,11 @@ where
                     .literal
                     .parse::<usize>()
                     .map_err(|_err| self.error("invalid number".to_string()))?;
-                return Ok(Expr::Number { pos, value });
+                return Ok(Expr::Number {
+                    pos,
+                    value,
+                    ty: None,
+                });
             }
             IDENT => {
                 let pos = self.expect(IDENT)?;
@@ -491,6 +500,7 @@ where
                 return Ok(Expr::Ident {
                     pos,
                     name: tok.literal,
+                    ty: None,
                 });
             }
             _ => Err(self.error(format!("expected expresssion"))),
@@ -503,22 +513,18 @@ where
         loop {
             let tok = self.peek()?;
             match tok.kind {
-                MUL => {
-                    let pos = self.expect(MUL)?;
+                MUL | DIV => {
+                    let pos = self.expect(tok.kind)?;
                     node = Expr::Binary {
-                        op: BinOp::MUL,
+                        op: if tok.kind == MUL {
+                            BinOp::MUL
+                        } else {
+                            BinOp::DIV
+                        },
                         pos,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
-                    };
-                }
-                Div => {
-                    let pos = self.expect(Div)?;
-                    node = Expr::Binary {
-                        op: BinOp::DIV,
-                        pos,
-                        lhs: node.into(),
-                        rhs: self.unary()?.into(),
+                        ty: None,
                     };
                 }
                 _ => break Ok(node),

@@ -22,7 +22,7 @@ pub enum TokenKind {
     ADD, // +
     SUB, // -
     MUL, // *
-    Div, // /
+    DIV, // /
 
     LPAREN, // (
     RPAREN, // )
@@ -142,7 +142,7 @@ impl<'a> Scanner<'a> {
                         '+' => ADD,
                         '-' => SUB,
                         '*' => MUL,
-                        '/' => Div,
+                        '/' => DIV,
                         ';' => SEMICOLON,
                         _ => unreachable!(),
                     };

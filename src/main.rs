@@ -8,6 +8,7 @@ mod error;
 mod parser;
 mod position;
 mod scanner;
+mod typecheck;
 
 const DEBUG: bool = false;
 

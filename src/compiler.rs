@@ -3,6 +3,7 @@ use std::fmt;
 use crate::error::{Result, SyntaxError};
 use crate::parser::{self, Expr, Node, Stmt, UnaryOp};
 use crate::position::Position;
+use crate::typecheck::{self, Kind};
 
 #[derive(Default)]
 pub struct Func {
@@ -55,9 +56,9 @@ impl Compiler {
         println!("  addi a3, sp, 0"); // mv a3, sp
         println!("  addi sp, sp, -{}", self.func.stack_size);
 
-        for s in self.func.body.clone().into_iter() {
-            self.stmt(s)?;
-        }
+        let mut prog = self.func.body.clone();
+        typecheck::Context::new().typecheck(&mut prog).unwrap();
+        self.stmts(&prog)?;
 
         println!(".L.return:");
         // free stack
@@ -69,8 +70,8 @@ impl Compiler {
     fn compute_lval_offset(&mut self) {
         let mut offset = 0;
         for o in self.func.objs.iter_mut() {
-            offset = offset + 8;
             o.offset = offset;
+            offset = offset + 8;
         }
         self.func.stack_size = align_to(offset, 16);
     }
@@ -85,20 +86,18 @@ impl Compiler {
         self.pos = n.pos();
     }
 
-    fn gen_expr(&mut self, expr: Expr) -> Result<()> {
-        self.set_position(&expr);
+    fn gen_expr(&mut self, expr: &Expr) -> Result<()> {
+        self.set_position(expr);
         match expr {
             Expr::Number { value, .. } => {
                 println!("  li a0, {}", value);
                 Ok(())
             }
-            Expr::Unary {
-                op, expr: _expr, ..
-            } => {
-                if op == UnaryOp::ADDR {
-                    return self.gen_addr(*_expr);
+            Expr::Unary { op, expr, .. } => {
+                if *op == UnaryOp::ADDR {
+                    return self.gen_addr(expr);
                 }
-                self.gen_expr(*_expr)?;
+                self.gen_expr(expr)?;
                 match op {
                     UnaryOp::POSITIVE => {}
                     UnaryOp::NEGATIVE => {
@@ -113,9 +112,20 @@ impl Compiler {
                 Ok(())
             }
             Expr::Binary { op, lhs, rhs, .. } => {
-                self.gen_expr(*lhs)?;
+                let (lty, rty) = (lhs.typecheck().unwrap(), rhs.typecheck().unwrap());
+                let ptr_index = lty.is(Kind::Ptr) || rty.is(Kind::Ptr);
+
+                self.gen_expr(lhs)?;
+                if ptr_index && lty.is(Kind::Int) && *op == ADD {
+                    println!("  addi t0, x0, 8");
+                    println!("  mul a0, a0, t0");
+                }
                 push();
-                self.gen_expr(*rhs)?;
+                self.gen_expr(rhs)?;
+                if ptr_index && rty.is(Kind::Int) && (*op == ADD || *op == SUB) {
+                    println!("  addi t0, x0, 8");
+                    println!("  mul a0, a0, t0");
+                }
                 pop("a1");
 
                 use parser::BinOp::*;
@@ -139,6 +149,11 @@ impl Compiler {
                     }
                 };
 
+                if ptr_index && rty.is(Kind::Ptr) && rty.is(Kind::Ptr) && *op == SUB {
+                    println!("  addi t0, x0, 8");
+                    println!("  div a0, a0, t0");
+                }
+
                 Ok(())
             }
             Expr::Ident { .. } => {
@@ -147,9 +162,9 @@ impl Compiler {
                 Ok(())
             }
             Expr::Assign { lhs, rhs, .. } => {
-                self.gen_addr(*lhs)?;
+                self.gen_addr(lhs)?;
                 push();
-                self.gen_expr(*rhs)?;
+                self.gen_expr(rhs)?;
                 pop("a1");
                 println!("  sd a0, (a1)");
                 Ok(())
@@ -157,19 +172,19 @@ impl Compiler {
         }
     }
 
-    fn stmts(&mut self, ss: Vec<Stmt>) -> Result<()> {
+    fn stmts(&mut self, ss: &Vec<Stmt>) -> Result<()> {
         for s in ss {
             self.stmt(s)?;
         }
         Ok(())
     }
 
-    fn stmt(&mut self, s: Stmt) -> Result<()> {
-        self.set_position(&s);
+    fn stmt(&mut self, s: &Stmt) -> Result<()> {
+        self.set_position(s);
         match s {
-            Stmt::Expr { expr, .. } => self.gen_expr(*expr),
+            Stmt::Expr { expr, .. } => self.gen_expr(expr),
             Stmt::Return { expr, .. } => {
-                self.gen_expr(*expr)?;
+                self.gen_expr(expr)?;
                 println!("  j .L.return");
                 Ok(())
             }
@@ -180,13 +195,13 @@ impl Compiler {
             } => {
                 let c = self.count();
 
-                self.gen_expr(*cond)?;
+                self.gen_expr(cond)?;
                 println!("  beqz a0, .L.else.{}", c);
-                self.stmt(*then)?;
+                self.stmt(then)?;
                 println!("  j .L.end.{}", c);
                 println!(".L.else.{}:", c);
                 if let Some(els) = r#else {
-                    self.stmt(*els)?;
+                    self.stmt(els)?;
                 }
                 println!(".L.end.{}:", c);
                 Ok(())
@@ -201,18 +216,18 @@ impl Compiler {
                 let c = self.count();
                 // while statement does not have init
                 if let Some(init) = init {
-                    self.stmt(*init)?;
+                    self.stmt(init)?;
                 }
                 println!(".L.start.{}:", c);
                 if let Some(cond) = cond {
-                    self.gen_expr(*cond)?;
+                    self.gen_expr(cond)?;
                     println!("  beqz a0, .L.end.{}", c);
                 }
 
-                self.stmt(*body)?;
+                self.stmt(body)?;
 
                 if let Some(post) = post {
-                    self.gen_expr(*post)?;
+                    self.gen_expr(post)?;
                 }
 
                 println!("  j .L.start.{}", c);
@@ -222,22 +237,25 @@ impl Compiler {
         }
     }
 
-    fn gen_addr(&mut self, e: Expr) -> Result<()> {
-        self.set_position(&e);
+    fn gen_addr(&mut self, e: &Expr) -> Result<()> {
+        self.set_position(e);
         match e {
             Expr::Ident { name, .. } => {
                 for i in self.func.objs.iter() {
-                    if i.name == name {
-                        println!("  addi a0, a3, {}", i.offset as isize - self.func.stack_size as isize);
+                    if i.name == *name {
+                        println!(
+                            "  addi a0, a3, {}",
+                            i.offset as isize - self.func.stack_size as isize
+                        );
                     }
                 }
                 Ok(())
-            },
-            Expr::Unary { op,expr,..} => {
-                if op != UnaryOp::DEREF {
+            }
+            Expr::Unary { op, expr, .. } => {
+                if *op != UnaryOp::DEREF {
                     return self.error("is not addressable");
                 }
-                self.gen_expr(*expr)
+                self.gen_expr(expr)
             }
             _ => self.error("is not addressable"),
         }
