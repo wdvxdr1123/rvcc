@@ -129,6 +129,7 @@ impl Context {
                 self.check_expr(lhs)?;
                 *ty = lhs.typecheck().clone();
             }
+            Expr::Call { ty, .. } => *ty = self.int(),
         }
         Ok(())
     }

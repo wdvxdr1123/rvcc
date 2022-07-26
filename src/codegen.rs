@@ -15,8 +15,9 @@ impl<'a> CodegenContext<'a> {
         println!("{}:", self.func.name);
 
         // 压入 fp
-        println!("  addi sp, sp, -8");
+        println!("  addi sp, sp, -16");
         println!("  sd fp, 0(sp)");
+        println!("  sd ra, 8(sp)");
         println!("  mv fp, sp");
 
         // stack alloc for local variables
@@ -29,7 +30,8 @@ impl<'a> CodegenContext<'a> {
         println!(".L.return:");
         println!("  mv sp, fp");
         println!("  ld fp, 0(sp)");
-        println!("  addi sp, sp, 8");
+        println!("  ld ra, 8(sp)");
+        println!("  addi sp, sp, 16");
         println!("  ret");
     }
 
@@ -69,10 +71,10 @@ impl<'a> CodegenContext<'a> {
             ir::Inst::Jmp(label) => println!("  j {}", label),
             ir::Inst::Push => {
                 println!("  addi sp, sp, -8");
-                println!("  sd   a0, 0(sp)");
+                println!("  sd a0, 0(sp)");
             }
             ir::Inst::Pop(reg) => {
-                println!("  ld   {}, 0(sp)", reg);
+                println!("  ld {}, 0(sp)", reg);
                 println!("  addi sp, sp, 8");
             }
             ir::Inst::Imm(imm) => println!("  li a0, {}", imm),
@@ -84,10 +86,14 @@ impl<'a> CodegenContext<'a> {
             ir::Inst::LocalVariable(name) => {
                 for var in self.func.values.iter() {
                     if *name == var.name {
-                        println!("  addi a0, fp, {}", var.offset);
+                        println!("  addi a0, fp, {}", var.offset - self.func.stack_size);
                         break;
                     }
                 }
+            }
+            ir::Inst::Call(name) => {
+                println!("  li a0, 0");
+                println!("  call {}", name);
             }
         }
     }

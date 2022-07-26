@@ -12,6 +12,7 @@ pub struct Block {
     pub statements: Vec<Inst>,
 }
 
+#[allow(dead_code)]
 impl Block {
     /// Adds a new instruction to the block
     pub fn add_instr(&mut self, instr: Inst) {

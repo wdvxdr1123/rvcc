@@ -15,6 +15,7 @@ pub enum Cmp {
 
 /// instruction
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum Inst {
     Add,
     Sub,
@@ -45,6 +46,8 @@ pub enum Inst {
     Shr(isize),
 
     LocalVariable(String),
+
+    Call(String),
 }
 
 impl fmt::Display for Inst {
@@ -85,6 +88,7 @@ impl fmt::Display for Inst {
             Self::Shl(i) => write!(f, "shl {}", i),
             Self::Shr(i) => write!(f, "shr {}", i),
             Self::LocalVariable(name) => write!(f, "local {}", name),
+            Self::Call(name) => write!(f, "call {}", name),
         }
     }
 }

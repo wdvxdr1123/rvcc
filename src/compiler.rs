@@ -153,6 +153,10 @@ impl Compiler {
                 self.add_inst(Inst::Store("a1".into()));
                 Ok(())
             }
+            Expr::Call {  name, .. } => {
+                self.add_inst(Inst::Call(name.clone()));
+                Ok(())
+            }
         }
     }
 

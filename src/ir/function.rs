@@ -57,8 +57,8 @@ impl Function {
     pub fn compute_lval_offset(&mut self) {
         let mut offset = 0;
         for o in self.values.iter_mut() {
-            o.offset = offset;
             offset = offset + 8;
+            o.offset = offset;
         }
         self.stack_size = align_to(offset, 16);
     }

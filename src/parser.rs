@@ -6,7 +6,7 @@ use crate::error::{Result, SyntaxError};
 use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
-use crate::typecheck::{self, Type};
+use crate::typecheck::Type;
 
 pub trait Node {
     fn pos(&self) -> Position;
@@ -45,6 +45,11 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Call {
+        pos: Position,
+        name: String,
+        ty: Type,
+    },
 }
 
 impl Expr {
@@ -55,6 +60,7 @@ impl Expr {
             Self::Number { ty, .. } => ty,
             Self::Ident { ty, .. } => ty,
             Self::Assign { ty, .. } => ty,
+            Self::Call { ty, .. } => ty,
         }
     }
 }
@@ -67,6 +73,7 @@ impl Node for Expr {
             Self::Number { pos, .. } => pos.clone(),
             Self::Ident { pos, .. } => pos.clone(),
             Self::Assign { pos, .. } => pos.clone(),
+            Self::Call { pos, .. } => pos.clone(),
         }
     }
 }
@@ -154,7 +161,6 @@ pub enum UnaryOp {
 pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
     position: Position,
-    objs: Vec<String>,
 
     pub ty_ident: HashMap<String, Type>,
 }
@@ -167,7 +173,6 @@ where
         Parser {
             tokens,
             position: Position { line: 0, column: 0 },
-            objs: vec![],
             ty_ident: HashMap::new(),
         }
     }
@@ -200,12 +205,6 @@ where
         };
         func.body = self.stmts()?;
         Ok(func)
-    }
-
-    fn ident(&mut self, name: &String) {
-        if !self.objs.contains(name) {
-            self.objs.push(name.clone())
-        }
     }
 
     pub fn stmts(&mut self) -> Result<Vec<Stmt>> {
@@ -540,10 +539,22 @@ where
             }
             IDENT => {
                 let pos = self.expect(IDENT)?;
-                self.ident(&tok.literal);
+                let name = tok.literal;
+
+                if self.peek()?.kind == LPAREN {
+                    self.expect(LPAREN)?;
+                    // todo arguments
+                    self.expect(RPAREN)?;
+                    return Ok(Expr::Call {
+                        pos,
+                        name,
+                        ty: Type::Unchecked,
+                    });
+                }
+
                 return Ok(Expr::Ident {
                     pos,
-                    name: tok.literal,
+                    name,
                     ty: Type::Unchecked,
                 });
             }
