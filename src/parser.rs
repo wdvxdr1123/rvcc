@@ -1,19 +1,16 @@
-use std::collections::binary_heap;
+use std::collections::HashMap;
 use std::iter::Peekable;
-use std::rc::{self, Rc};
 
-use crate::compiler::{Func, Object};
+use crate::compiler::Func;
 use crate::error::{Result, SyntaxError};
 use crate::position::Position;
 use crate::scanner::Token;
 use crate::scanner::TokenKind::{self, *};
-use crate::typecheck::Type;
+use crate::typecheck::{self, Type};
 
 pub trait Node {
     fn pos(&self) -> Position;
 }
-
-type Typ = Option<Rc<Type>>;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -23,41 +20,41 @@ pub enum Expr {
         pos: Position,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
-        ty: Typ,
+        ty: Type,
     },
     Unary {
         op: UnaryOp,
         pos: Position,
         expr: Box<Expr>,
 
-        ty: Typ,
+        ty: Type,
     },
     Number {
         pos: Position,
         value: usize,
-        ty: Typ,
+        ty: Type,
     },
     Ident {
         pos: Position,
         name: String,
-        ty: Typ,
+        ty: Type,
     },
     Assign {
         lhs: Box<Expr>,
         pos: Position,
         rhs: Box<Expr>,
-        ty: Typ,
+        ty: Type,
     },
 }
 
 impl Expr {
-    pub fn typecheck(&self) -> Option<Rc<Type>> {
+    pub fn typecheck(&self) -> &Type {
         match self {
-            Self::Binary { ty, .. } => ty.clone(),
-            Self::Unary { ty, .. } => ty.clone(),
-            Self::Number { ty, .. } => ty.clone(),
-            Self::Ident { ty, .. } => ty.clone(),
-            Self::Assign { ty, .. } => ty.clone(),
+            Self::Binary { ty, .. } => ty,
+            Self::Unary { ty, .. } => ty,
+            Self::Number { ty, .. } => ty,
+            Self::Ident { ty, .. } => ty,
+            Self::Assign { ty, .. } => ty,
         }
     }
 }
@@ -107,7 +104,17 @@ pub enum Stmt {
         rparen: Position,
         body: Box<Stmt>,
     },
+    Declaration {
+        pos: Position,
+        decls: Vec<Declarator>,
+    },
     None(Position),
+}
+
+#[derive(Clone, Debug)]
+pub struct Declarator {
+    pub name: String,
+    pub init: Option<Box<Expr>>,
 }
 
 impl Node for Stmt {
@@ -119,11 +126,12 @@ impl Node for Stmt {
             Stmt::If { pos, .. } => pos.clone(),
             Stmt::For { pos, .. } => pos.clone(),
             Stmt::None(pos) => pos.clone(),
+            Stmt::Declaration { pos, .. } => pos.clone(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub enum BinOp {
     ADD,
     SUB,
@@ -147,6 +155,8 @@ pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
     position: Position,
     objs: Vec<String>,
+
+    pub ty_ident: HashMap<String, Type>,
 }
 
 impl<T> Parser<T>
@@ -158,6 +168,7 @@ where
             tokens,
             position: Position { line: 0, column: 0 },
             objs: vec![],
+            ty_ident: HashMap::new(),
         }
     }
 
@@ -171,10 +182,14 @@ where
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Position> {
+        self.expect_token(kind).and_then(|x| Ok(x.position))
+    }
+
+    fn expect_token(&mut self, kind: TokenKind) -> Result<Token> {
         let tok = self.peek()?;
         if tok.kind == kind {
             self.tokens.next();
-            return Ok(tok.position);
+            return Ok(tok);
         }
         return Err(self.error(format!("expected {}", kind)));
     }
@@ -184,14 +199,6 @@ where
             ..Default::default()
         };
         func.body = self.stmts()?;
-
-        for o in self.objs.iter() {
-            func.objs.push(Object {
-                name: o.clone(),
-                offset: 0,
-            })
-        }
-
         Ok(func)
     }
 
@@ -214,6 +221,7 @@ where
     //      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
     //      | "while" "(" expr ")" stmt
     //      | compound-stmt
+    //      | declaration
     //      | expr-stmt
     fn stmt(&mut self) -> Result<Stmt> {
         let tok = self.peek()?;
@@ -308,8 +316,44 @@ where
                 })
             }
             LBRACE => self.compound_stmt(),
+            INT => {
+                let pos = self.expect(INT)?;
+                let ty = Type::Int;
+                let mut decls = vec![];
+                while self.peek()?.kind != SEMICOLON {
+                    if !decls.is_empty() {
+                        self.expect(COMMA)?;
+                    }
+                    decls.push(self.declator(ty.clone())?)
+                }
+                self.expect(SEMICOLON)?;
+                Ok(Stmt::Declaration { pos, decls })
+            }
             _ => self.expr_stmt(),
         }
+    }
+
+    fn declator(&mut self, mut ty: Type) -> Result<Declarator> {
+        while self.peek()?.kind == MUL {
+            self.expect(MUL)?;
+            ty = ty.pointer_to();
+        }
+
+        let ident = self.expect_token(IDENT)?;
+
+        self.ty_ident.insert(ident.literal.clone(), ty);
+
+        let init = if self.peek()?.kind == ASSIGN {
+            self.expect(ASSIGN)?;
+            Some(self.expr()?.into())
+        } else {
+            None
+        };
+
+        Ok(Declarator {
+            name: ident.literal,
+            init,
+        })
     }
 
     // compound-stmt = "{" stmt* "}"
@@ -351,13 +395,13 @@ where
 
     fn assign(&mut self) -> Result<Expr> {
         let mut expr = self.equality()?;
-        if self.peek()?.kind == Assign {
-            let pos = self.expect(Assign)?;
+        if self.peek()?.kind == ASSIGN {
+            let pos = self.expect(ASSIGN)?;
             expr = Expr::Assign {
                 lhs: expr.into(),
                 pos,
                 rhs: self.assign()?.into(),
-                ty: None,
+                ty: Type::Unchecked,
             }
         }
         Ok(expr)
@@ -376,7 +420,7 @@ where
                         pos,
                         lhs: node.into(),
                         rhs: self.add()?.into(),
-                        ty: None,
+                        ty: Type::Unchecked,
                     };
                 }
                 _ => break Ok(node),
@@ -406,7 +450,7 @@ where
                             pos,
                             lhs: node.into(),
                             rhs: self.add()?.into(),
-                            ty: None,
+                            ty: Type::Unchecked,
                         };
                     } else {
                         node = Expr::Binary {
@@ -414,7 +458,7 @@ where
                             pos,
                             lhs: self.add()?.into(),
                             rhs: node.into(),
-                            ty: None,
+                            ty: Type::Unchecked,
                         };
                     }
                 }
@@ -440,7 +484,7 @@ where
                         pos,
                         lhs: node.into(),
                         rhs: self.mul()?.into(),
-                        ty: None,
+                        ty: Type::Unchecked,
                     };
                 }
                 _ => break Ok(node),
@@ -465,7 +509,7 @@ where
                     op,
                     pos,
                     expr: self.unary()?.into(),
-                    ty: None,
+                    ty: Type::Unchecked,
                 });
             }
             _ => {}
@@ -491,7 +535,7 @@ where
                 return Ok(Expr::Number {
                     pos,
                     value,
-                    ty: None,
+                    ty: Type::Unchecked,
                 });
             }
             IDENT => {
@@ -500,7 +544,7 @@ where
                 return Ok(Expr::Ident {
                     pos,
                     name: tok.literal,
-                    ty: None,
+                    ty: Type::Unchecked,
                 });
             }
             _ => Err(self.error(format!("expected expresssion"))),
@@ -524,7 +568,7 @@ where
                         pos,
                         lhs: node.into(),
                         rhs: self.unary()?.into(),
-                        ty: None,
+                        ty: Type::Unchecked,
                     };
                 }
                 _ => break Ok(node),

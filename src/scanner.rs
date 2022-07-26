@@ -10,6 +10,7 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "else" => TokenKind::ELSE,
     "for" => TokenKind::FOR,
     "while" => TokenKind::WHILE,
+    "int" => TokenKind::INT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,10 +40,11 @@ pub enum TokenKind {
     GTR, // >
     LSS, // <
 
-    Assign, // =
+    ASSIGN, // =
 
     NOT,       // !
     SEMICOLON, // ;
+    COMMA,
 
     AND,
     ANDAND,
@@ -53,6 +55,8 @@ pub enum TokenKind {
     ELSE,
     FOR,
     WHILE,
+
+    INT,
 
     EOF,
 }
@@ -137,13 +141,14 @@ impl<'a> Scanner<'a> {
                     self.next_char();
                     break tok;
                 }
-                c @ ('+' | '-' | '*' | '/' | ';') => {
+                c @ ('+' | '-' | '*' | '/' | ';' | ',') => {
                     let tok = match *c {
                         '+' => ADD,
                         '-' => SUB,
                         '*' => MUL,
                         '/' => DIV,
                         ';' => SEMICOLON,
+                        ',' => COMMA,
                         _ => unreachable!(),
                     };
                     self.next_char();
@@ -151,7 +156,7 @@ impl<'a> Scanner<'a> {
                 }
                 '=' => {
                     self.next_char();
-                    break self.switch2(Assign, '=', EQ);
+                    break self.switch2(ASSIGN, '=', EQ);
                 }
                 '>' => {
                     self.next_char();

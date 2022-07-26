@@ -1,8 +1,8 @@
-use std::{collections::binary_heap, rc::Rc};
+use std::collections::HashMap;
 
 use crate::{
     error::SyntaxError,
-    parser::{BinOp, Expr, Node, Stmt, UnaryOp},
+    parser::{BinOp, Expr, Stmt, UnaryOp},
 };
 
 #[derive(Debug)]
@@ -12,14 +12,16 @@ type Result<T> = std::result::Result<T, SyntaxError>;
 
 #[derive(Debug, PartialEq)]
 pub enum Kind {
+    Unchecked,
     Int,
     Ptr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    Unchecked,
     Int,
-    Pointer(Rc<Type>),
+    Pointer(Box<Type>),
 }
 
 impl Type {
@@ -27,47 +29,52 @@ impl Type {
         match self {
             Type::Int => Kind::Int,
             Type::Pointer(_) => Kind::Ptr,
+            _ => Kind::Unchecked,
         }
     }
 
     pub fn is(&self, kind: Kind) -> bool {
         return self.kind() == kind;
     }
+
+    pub fn checked(&self) -> bool {
+        match self {
+            Self::Unchecked => false,
+            _ => true,
+        }
+    }
+
+    pub fn pointer_to(&self) -> Type {
+        if self != &Type::Unchecked {
+            Type::Pointer(Box::new(self.clone()))
+        } else {
+            Type::Unchecked
+        }
+    }
 }
 
 pub struct Context {
-    ty_int: Rc<Type>,
+    ty_ident: HashMap<String, Type>,
+    ty_int: Type,
 }
 
 impl Context {
-    pub fn new() -> Self {
+    pub fn new(tys: HashMap<String, Type>) -> Self {
         Context {
-            ty_int: Rc::new(Type::Int),
+            ty_ident: tys,
+            ty_int: Type::Int,
         }
     }
 
-    fn int(&self) -> Rc<Type> {
+    fn int(&self) -> Type {
         self.ty_int.clone()
     }
 
-    fn pointer_to(&self, to: &Expr) -> Option<Rc<Type>> {
-        if let Some(typ) = to.typecheck() {
-            Some(Rc::new(Type::Pointer(typ)))
+    fn elem(&self, expr: &Expr) -> Type {
+        if let Type::Pointer(x) = expr.typecheck() {
+            *x.clone()
         } else {
-            None
-        }
-    }
-
-    fn elem(&self, expr: &Expr) -> Option<Rc<Type>> {
-        match expr.typecheck() {
-            Some(inner) => {
-                if let Type::Pointer(typ) = inner.as_ref() {
-                    Some(typ.clone())
-                } else {
-                    Some(self.int())
-                }
-            }
-            _ => None,
+            Type::Unchecked
         }
     }
 
@@ -76,7 +83,7 @@ impl Context {
     }
 
     pub fn check_expr(&self, expr: &mut Expr) -> Result<()> {
-        if expr.typecheck().is_some() {
+        if expr.typecheck().checked() {
             return Ok(());
         }
 
@@ -89,38 +96,38 @@ impl Context {
 
                 *ty = match op {
                     BinOp::SUB => {
-                        let (lty, rty) = (lhs.typecheck().unwrap(), rhs.typecheck().unwrap());
+                        let (lty, rty) = (lhs.typecheck(), rhs.typecheck());
                         if lty.is(Kind::Ptr) && rty.is(Kind::Ptr) {
-                            Some(self.int())
+                            self.int()
                         } else {
-                            Some(lty)
+                            lty.clone()
                         }
-                    },
-                    _ => lhs.typecheck(),
+                    }
+                    _ => lhs.typecheck().clone(),
                 };
             }
             Expr::Unary { op, expr, ty, .. } => {
                 self.check_expr(expr)?;
                 match op {
                     UnaryOp::ADDR => {
-                        *ty = self.pointer_to(expr);
+                        *ty = expr.typecheck().pointer_to();
                     }
                     UnaryOp::DEREF => {
                         *ty = self.elem(expr);
                     }
-                    _ => *ty = expr.typecheck(),
+                    _ => *ty = expr.typecheck().clone(),
                 }
             }
             Expr::Number { ty, .. } => {
-                *ty = Some(self.int());
+                *ty = self.int();
             }
-            Expr::Ident { ty, .. } => {
-                *ty = Some(self.int());
+            Expr::Ident { ty, name, .. } => {
+                *ty = self.ty_ident.get(name).unwrap().clone();
             }
             Expr::Assign { lhs, rhs, ty, .. } => {
                 self.check_expr(rhs)?;
                 self.check_expr(lhs)?;
-                *ty = lhs.typecheck();
+                *ty = lhs.typecheck().clone();
             }
         }
         Ok(())
@@ -167,120 +174,15 @@ impl Context {
                 }
                 self.check_stmt(body)
             }
+            Stmt::Declaration { decls, .. } => {
+                for decl in decls {
+                    if let Some(ref mut init) = decl.init {
+                        self.check_expr(init)?;
+                    }
+                }
+                Ok(())
+            }
             Stmt::None(_) => Ok(()),
         }
-    }
-
-    fn check_add(&self, lhs: &mut Expr, rhs: &mut Expr) -> Result<()> {
-        let (lty, rty) = (lhs.typecheck().unwrap(), rhs.typecheck().unwrap());
-        // num + num
-        if lty.is(Kind::Int) && rty.is(Kind::Int) {
-            return Ok(());
-        }
-        // ptr + ptr
-        if lty.is(Kind::Ptr) && rty.is(Kind::Ptr) {
-            return Ok(()); // todo: error
-        }
-
-        if lty.is(Kind::Ptr) && rty.is(Kind::Int) {
-            *rhs = {
-                Expr::Binary {
-                    op: BinOp::MUL,
-                    pos: rhs.pos(),
-                    rhs: Expr::Number {
-                        pos: rhs.pos(),
-                        value: 8,
-                        ty: None,
-                    }
-                    .into(),
-                    lhs: Box::new(rhs.clone()),
-                    ty: None,
-                }
-            };
-            self.check_expr(lhs)?;
-        }
-
-        if lty.is(Kind::Int) && rty.is(Kind::Ptr) {
-            *lhs = {
-                Expr::Binary {
-                    op: BinOp::MUL,
-                    pos: lhs.pos(),
-                    rhs: Expr::Number {
-                        pos: lhs.pos(),
-                        value: 8,
-                        ty: None,
-                    }
-                    .into(),
-                    lhs: Box::new(lhs.clone()),
-                    ty: None,
-                }
-            };
-            self.check_expr(lhs)?;
-        }
-
-        Ok(())
-    }
-
-    fn check_sub(&self, lhs: &mut Expr, rhs: &mut Expr) -> Result<()> {
-        let (lty, rty) = (lhs.typecheck().unwrap(), rhs.typecheck().unwrap());
-        // num + num
-        if lty.is(Kind::Int) && rty.is(Kind::Int) {
-            return Ok(());
-        }
-        // ptr - ptr
-        if lty.is(Kind::Ptr) && rty.is(Kind::Ptr) {
-            *lhs = {
-                Expr::Binary {
-                    op: BinOp::DIV,
-                    pos: lhs.pos(),
-                    rhs: Expr::Number {
-                        pos: lhs.pos(),
-                        value: 8,
-                        ty: None,
-                    }
-                    .into(),
-                    lhs: Box::new(lhs.clone()),
-                    ty: None,
-                }
-            };
-            self.check_expr(lhs)?;
-            *rhs = {
-                Expr::Binary {
-                    op: BinOp::DIV,
-                    pos: rhs.pos(),
-                    rhs: Expr::Number {
-                        pos: rhs.pos(),
-                        value: 8,
-                        ty: None,
-                    }
-                    .into(),
-                    lhs: Box::new(rhs.clone()),
-                    ty: None,
-                }
-            };
-            self.check_expr(rhs)?;
-            return Ok(()); // todo: fix
-        }
-
-        // ptr - num
-        if lty.is(Kind::Ptr) && rty.is(Kind::Int) {
-            *rhs = {
-                Expr::Binary {
-                    op: BinOp::MUL,
-                    pos: rhs.pos(),
-                    rhs: Expr::Number {
-                        pos: rhs.pos(),
-                        value: 8,
-                        ty: None,
-                    }
-                    .into(),
-                    lhs: Box::new(rhs.clone()),
-                    ty: None,
-                }
-            };
-            self.check_expr(rhs)?;
-        }
-
-        Ok(())
     }
 }

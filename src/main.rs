@@ -3,8 +3,10 @@ use std::{env::args, error::Error};
 use error::{error_at, Result};
 use scanner::Scanner;
 
+mod codegen;
 mod compiler;
 mod error;
+mod ir;
 mod parser;
 mod position;
 mod scanner;
@@ -37,7 +39,8 @@ fn compile(s: String) -> Result<()> {
             println!("{}", tok.kind);
         }
     }
-    let prog = parser::Parser::new(tokens.into_iter().peekable()).function()?;
-    compiler::Compiler::new(prog).compile()?;
+    let mut p = parser::Parser::new(tokens.into_iter().peekable());
+    let prog = p.function()?;
+    compiler::Compiler::new(prog).compile(p.ty_ident)?;
     Ok(())
 }
