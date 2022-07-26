@@ -48,6 +48,7 @@ pub enum Expr {
     Call {
         pos: Position,
         name: String,
+        arguments: Vec<Expr>,
         ty: Type,
     },
 }
@@ -543,11 +544,20 @@ where
 
                 if self.peek()?.kind == LPAREN {
                     self.expect(LPAREN)?;
-                    // todo arguments
+
+                    let mut arguments = vec![];
+                    while self.peek()?.kind != RPAREN {
+                        if !arguments.is_empty() {
+                            self.expect(COMMA)?;
+                        }
+                        arguments.push(self.expr()?);
+                    }
+
                     self.expect(RPAREN)?;
                     return Ok(Expr::Call {
                         pos,
                         name,
+                        arguments,
                         ty: Type::Unchecked,
                     });
                 }

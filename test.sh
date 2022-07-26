@@ -2,6 +2,12 @@
 cat <<EOF | riscv64-unknown-linux-gnu-gcc -xc -c -o tmp2.o -
 int ret3() { return 3; }
 int ret5() { return 5; }
+int add(int x, int y) { return x+y; }
+int sub(int x, int y) { return x-y; }
+
+int add8(int a, int b, int c, int d, int e, int f, int g, int h) {
+  return a+b+c+d+e+f+g+h;
+}
 EOF
 
 # 声明一个函数
@@ -104,5 +110,11 @@ assert 8 '{ int x=3, y=5; return x+y; }'
 
 assert 3 '{ return ret3(); }'
 assert 5 '{ return ret5(); }'
+
+assert 8 '{ return add(3, 5); }'
+assert 2 '{ return sub(5, 3); }'
+assert 36 '{ return add8(1,2,3,4,5,6,7,8); }'
+assert 91 '{ return add8(1,2,add8(3,4,5,6,7,8,0,0),9,10,11,12,13); }'
+assert 140 '{ return add8(1,2,add8(3,add8(4,5,6,7,8,9,0,0),10,11,12,13,1,1),14,15,16,1,1); }'
 
 echo OK

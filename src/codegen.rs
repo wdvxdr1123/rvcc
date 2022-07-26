@@ -92,7 +92,6 @@ impl<'a> CodegenContext<'a> {
                 }
             }
             ir::Inst::Call(name) => {
-                println!("  li a0, 0");
                 println!("  call {}", name);
             }
         }

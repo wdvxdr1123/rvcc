@@ -129,7 +129,12 @@ impl Context {
                 self.check_expr(lhs)?;
                 *ty = lhs.typecheck().clone();
             }
-            Expr::Call { ty, .. } => *ty = self.int(),
+            Expr::Call { arguments, ty, .. } => {
+                for argument in arguments {
+                    self.check_expr(argument)?;
+                }
+                *ty = self.int()
+            }
         }
         Ok(())
     }

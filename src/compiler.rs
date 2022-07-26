@@ -8,6 +8,8 @@ use crate::parser::{BinOp, Expr, Node, Stmt, UnaryOp};
 use crate::position::Position;
 use crate::typecheck::{self, Kind, Type};
 
+const ARGUMENT_REGS: [&str; 8] = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"];
+
 #[derive(Default)]
 pub struct Func {
     pub body: Vec<Stmt>,
@@ -153,7 +155,16 @@ impl Compiler {
                 self.add_inst(Inst::Store("a1".into()));
                 Ok(())
             }
-            Expr::Call {  name, .. } => {
+            Expr::Call { name, arguments, .. } => {
+                for argument in arguments {
+                    self.gen_expr(argument)?;
+                    self.push();
+                }
+
+                for reg in ARGUMENT_REGS.iter().take(arguments.len()).rev() {
+                    self.pop(*reg);
+                }
+
                 self.add_inst(Inst::Call(name.clone()));
                 Ok(())
             }
