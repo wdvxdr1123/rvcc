@@ -27,12 +27,13 @@ impl<'a> CodegenContext<'a> {
             self.gen_block(blk);
         }
 
-        println!(".L.return:");
+        println!(".L.return.{}:", self.func.name);
         println!("  mv sp, fp");
         println!("  ld fp, 0(sp)");
         println!("  ld ra, 8(sp)");
         println!("  addi sp, sp, 16");
         println!("  ret");
+        println!();
     }
 
     fn gen_block(&self, blk: &ir::Block) {
@@ -66,7 +67,7 @@ impl<'a> CodegenContext<'a> {
             },
             ir::Inst::And => todo!(),
             ir::Inst::Or => todo!(),
-            ir::Inst::Ret => println!("  j .L.return"),
+            ir::Inst::Ret => println!("  j .L.return.{}", self.func.name),
             ir::Inst::Jz(label) => println!("  beqz a0, {}", label),
             ir::Inst::Jmp(label) => println!("  j {}", label),
             ir::Inst::Push => {

@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::iter::Peekable;
+use std::rc::Rc;
 
-use crate::compiler::Func;
 use crate::error::{Result, SyntaxError};
 use crate::position::Position;
 use crate::scanner::Token;
@@ -54,14 +53,14 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn typecheck(&self) -> &Type {
+    pub fn typecheck(&self) -> Type {
         match self {
-            Self::Binary { ty, .. } => ty,
-            Self::Unary { ty, .. } => ty,
-            Self::Number { ty, .. } => ty,
-            Self::Ident { ty, .. } => ty,
-            Self::Assign { ty, .. } => ty,
-            Self::Call { ty, .. } => ty,
+            Self::Binary { ty, .. } => ty.clone(),
+            Self::Unary { ty, .. } => ty.clone(),
+            Self::Number { ty, .. } => ty.clone(),
+            Self::Ident { ty, .. } => ty.clone(),
+            Self::Assign { ty, .. } => ty.clone(),
+            Self::Call { ty, .. } => ty.clone(),
         }
     }
 }
@@ -121,8 +120,22 @@ pub enum Stmt {
 
 #[derive(Clone, Debug)]
 pub struct Declarator {
+    pub ty: Type,
     pub name: String,
     pub init: Option<Box<Expr>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Decl {
+    Func(Func),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Func {
+    pub name: String,
+    pub body: Vec<Stmt>,
+
+    pub return_ty: Type,
 }
 
 impl Node for Stmt {
@@ -162,8 +175,6 @@ pub enum UnaryOp {
 pub struct Parser<T: Iterator<Item = Token>> {
     tokens: Peekable<T>,
     position: Position,
-
-    pub ty_ident: HashMap<String, Type>,
 }
 
 impl<T> Parser<T>
@@ -174,7 +185,6 @@ where
         Parser {
             tokens,
             position: Position { line: 0, column: 0 },
-            ty_ident: HashMap::new(),
         }
     }
 
@@ -185,6 +195,15 @@ where
         } else {
             Err(self.error("unexpected eof".to_string()))
         }
+    }
+
+    pub fn end(&mut self) -> bool {
+        if let Ok(x) = self.peek() {
+            if x.kind != EOF {
+                return false;
+            }
+        }
+        true
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Position> {
@@ -200,14 +219,27 @@ where
         return Err(self.error(format!("expected {}", kind)));
     }
 
-    pub fn function(&mut self) -> Result<Func> {
-        let mut func = Func {
-            ..Default::default()
-        };
-        func.body = self.stmts()?;
-        Ok(func)
+    pub fn decl(&mut self) -> Result<Decl> {
+        Ok(Decl::Func(self.func_decl()?))
     }
 
+    pub fn func_decl(&mut self) -> Result<Func> {
+        let ty = self.declspec()?;
+        let decl = self.declator(ty)?;
+
+        let body = if let Stmt::Block { body, .. } = self.compound_stmt()? {
+            body
+        } else {
+            vec![]
+        };
+        Ok(Func {
+            name: decl.name,
+            body,
+            return_ty: decl.ty,
+        })
+    }
+
+    #[allow(dead_code)]
     pub fn stmts(&mut self) -> Result<Vec<Stmt>> {
         let mut s = vec![];
         while self.peek()?.kind != EOF {
@@ -317,20 +349,43 @@ where
             }
             LBRACE => self.compound_stmt(),
             INT => {
-                let pos = self.expect(INT)?;
-                let ty = Type::Int;
+                let ty = self.declspec()?;
                 let mut decls = vec![];
                 while self.peek()?.kind != SEMICOLON {
                     if !decls.is_empty() {
                         self.expect(COMMA)?;
                     }
-                    decls.push(self.declator(ty.clone())?)
+                    let mut decl = self.declator(ty.clone())?;
+
+                    if self.peek()?.kind == ASSIGN {
+                        self.expect(ASSIGN)?;
+                        decl.init = Some(self.expr()?.into());
+                    }
+
+                    decls.push(decl);
                 }
                 self.expect(SEMICOLON)?;
-                Ok(Stmt::Declaration { pos, decls })
+                Ok(Stmt::Declaration {
+                    pos: tok.position,
+                    decls,
+                })
             }
             _ => self.expr_stmt(),
         }
+    }
+
+    fn declspec(&mut self) -> Result<Type> {
+        self.expect(INT)?;
+        Ok(Type::Int)
+    }
+
+    fn type_suffix(&mut self, mut ty: Type) -> Result<Type> {
+        if self.peek()?.kind == LPAREN {
+            self.expect(LPAREN)?;
+            ty = Type::Func(Rc::new(ty));
+            self.expect(RPAREN)?;
+        }
+        Ok(ty)
     }
 
     fn declator(&mut self, mut ty: Type) -> Result<Declarator> {
@@ -338,21 +393,12 @@ where
             self.expect(MUL)?;
             ty = ty.pointer_to();
         }
-
         let ident = self.expect_token(IDENT)?;
-
-        self.ty_ident.insert(ident.literal.clone(), ty);
-
-        let init = if self.peek()?.kind == ASSIGN {
-            self.expect(ASSIGN)?;
-            Some(self.expr()?.into())
-        } else {
-            None
-        };
-
+        ty = self.type_suffix(ty)?;
         Ok(Declarator {
+            ty,
             name: ident.literal,
-            init,
+            init: None,
         })
     }
 
@@ -531,7 +577,7 @@ where
                 let value = tok
                     .literal
                     .parse::<usize>()
-                    .map_err(|_err| self.error("invalid number".to_string()))?;
+                    .map_err(|_| self.error("invalid number".to_string()))?;
                 return Ok(Expr::Number {
                     pos,
                     value,

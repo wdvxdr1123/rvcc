@@ -4,32 +4,30 @@ use std::fmt;
 use crate::codegen;
 use crate::error::{Result, SyntaxError};
 use crate::ir::{self, Cmp, Inst};
-use crate::parser::{BinOp, Expr, Node, Stmt, UnaryOp};
+use crate::parser::{BinOp, Decl, Expr, Node, Stmt, UnaryOp};
 use crate::position::Position;
-use crate::typecheck::{self, Kind, Type};
+use crate::typecheck::{Kind, Type};
 
 const ARGUMENT_REGS: [&str; 8] = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"];
 
-#[derive(Default)]
-pub struct Func {
-    pub body: Vec<Stmt>,
-}
-
-pub struct Compiler {
-    pub func: Func,
+pub struct IRGen {
     label_index: usize,
     pos: Position,
+    decls: Vec<Decl>,
 
     pub functions: Vec<ir::Function>,
+
+    ident_ty: HashMap<String, Type>,
 }
 
-impl Compiler {
-    pub fn new(func: Func) -> Self {
-        Compiler {
-            func,
+impl IRGen {
+    pub fn new(decls: Vec<Decl>) -> Self {
+        IRGen {
             label_index: 0,
             pos: Position::no_postion(),
+            decls,
             functions: vec![],
+            ident_ty: HashMap::new(),
         }
     }
 
@@ -60,19 +58,26 @@ impl Compiler {
         self.add_inst(Inst::Pop(reg.to_string()));
     }
 
-    pub fn compile(&mut self, ty_ident: HashMap<String, Type>) -> Result<()> {
-        self.add_function("main".into());
+    pub fn compile(&mut self) -> Result<()> {
+        for  ref decl in self.decls.clone().iter() {
+            self.gen_decl(decl)?;
+        }
+        Ok(())
+    }
 
-        let mut prog = self.func.body.clone();
-        typecheck::Context::new(ty_ident)
-            .typecheck(&mut prog)
-            .unwrap();
-        self.stmts(&prog)?;
+    fn gen_decl(&mut self, decl : &Decl) -> Result<()> {
+        match decl {
+            Decl::Func(f) => {
+                self.add_function(f.name.clone());
 
-        self.functions.last_mut().unwrap().compute_lval_offset();
+                let mut prog = f.body.clone();
+                self.stmts(&mut prog)?;
 
-        codegen::CodegenContext::new(self.functions.last().unwrap()).codegen();
+                self.functions.last_mut().unwrap().compute_lval_offset();
 
+                codegen::CodegenContext::new(self.functions.last().unwrap()).codegen();
+            }
+        }
         Ok(())
     }
 
@@ -86,8 +91,9 @@ impl Compiler {
         self.pos = n.pos();
     }
 
-    fn gen_expr(&mut self, expr: &Expr) -> Result<()> {
+    fn gen_expr(&mut self, expr: &mut Expr) -> Result<()> {
         self.set_position(expr);
+        self.check_expr(expr)?;
         match expr {
             Expr::Number { value, .. } => {
                 self.add_inst(Inst::Imm(*value));
@@ -155,13 +161,16 @@ impl Compiler {
                 self.add_inst(Inst::Store("a1".into()));
                 Ok(())
             }
-            Expr::Call { name, arguments, .. } => {
+            Expr::Call {
+                name, arguments, ..
+            } => {
+                let argc = arguments.len();
                 for argument in arguments {
                     self.gen_expr(argument)?;
                     self.push();
                 }
 
-                for reg in ARGUMENT_REGS.iter().take(arguments.len()).rev() {
+                for reg in ARGUMENT_REGS.iter().take(argc).rev() {
                     self.pop(*reg);
                 }
 
@@ -171,14 +180,14 @@ impl Compiler {
         }
     }
 
-    fn stmts(&mut self, ss: &Vec<Stmt>) -> Result<()> {
+    fn stmts(&mut self, ss: &mut Vec<Stmt>) -> Result<()> {
         for s in ss {
             self.stmt(s)?;
         }
         Ok(())
     }
 
-    fn stmt(&mut self, s: &Stmt) -> Result<()> {
+    fn stmt(&mut self, s: &mut Stmt) -> Result<()> {
         self.set_position(s);
         match s {
             Stmt::Expr { expr, .. } => self.gen_expr(expr),
@@ -240,7 +249,8 @@ impl Compiler {
             Stmt::Declaration { decls, .. } => {
                 for decl in decls {
                     self.local_variable(decl.name.clone());
-                    if let Some(init) = &decl.init {
+                    self.ident_ty.insert(decl.name.clone(), decl.ty.clone());
+                    if let Some(ref mut init) = decl.init {
                         self.add_inst(Inst::LocalVariable(decl.name.clone()));
                         self.push();
                         self.gen_expr(init)?;
@@ -253,7 +263,7 @@ impl Compiler {
         }
     }
 
-    fn gen_addr(&mut self, e: &Expr) -> Result<()> {
+    fn gen_addr(&mut self, e: &mut Expr) -> Result<()> {
         self.set_position(e);
         match e {
             Expr::Ident { name, .. } => {
@@ -268,6 +278,64 @@ impl Compiler {
             }
             _ => self.error("is not addressable"),
         }
+    }
+
+    // type check for expression
+    pub fn check_expr(&self, expr: &mut Expr) -> Result<()> {
+        if expr.typecheck().checked() {
+            return Ok(());
+        }
+
+        match expr {
+            Expr::Binary {
+                op, lhs, rhs, ty, ..
+            } => {
+                self.check_expr(lhs)?;
+                self.check_expr(rhs)?;
+
+                *ty = match op {
+                    BinOp::SUB => {
+                        let (lty, rty) = (lhs.typecheck(), rhs.typecheck());
+                        if lty.is(Kind::Ptr) && rty.is(Kind::Ptr) {
+                            Type::Int
+                        } else {
+                            lty.clone()
+                        }
+                    }
+                    _ => lhs.typecheck().clone(),
+                };
+            }
+            Expr::Unary { op, expr, ty, .. } => {
+                self.check_expr(expr)?;
+                match op {
+                    UnaryOp::ADDR => {
+                        *ty = expr.typecheck().pointer_to();
+                    }
+                    UnaryOp::DEREF => {
+                        *ty = expr.typecheck().elem();
+                    }
+                    _ => *ty = expr.typecheck().clone(),
+                }
+            }
+            Expr::Number { ty, .. } => {
+                *ty = Type::Int;
+            }
+            Expr::Ident { ty, name, .. } => {
+                *ty = self.ident_ty.get(name).unwrap().clone();
+            }
+            Expr::Assign { lhs, rhs, ty, .. } => {
+                self.check_expr(rhs)?;
+                self.check_expr(lhs)?;
+                *ty = lhs.typecheck().clone();
+            }
+            Expr::Call { arguments, ty, .. } => {
+                for argument in arguments {
+                    self.check_expr(argument)?;
+                }
+                *ty = Type::Int;
+            }
+        }
+        Ok(())
     }
 
     fn error<T, V: fmt::Display>(&self, msg: V) -> Result<T> {
